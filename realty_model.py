@@ -32,7 +32,7 @@ import os
 # для работы progress_apply
 tqdm.pandas(desc="In Progress")
 
-
+# -
 def is_lot_finished(driver, lot_url):
     lot_status = 0
     final_price = np.nan
@@ -97,12 +97,15 @@ def is_lot_finished(driver, lot_url):
 
 
 def go_to_procedure_detail(driver, tab_name):
-    element = driver.find_element(By.XPATH, "//div[text()=tab_name]")
+    """Функция переключения по вкладкам внутри сраницы объекта на investmoscow.ru
+    :param tab_name: надпись на вкладке
+    :return driver после открытия нужной вкладки"""
+    element = driver.find_element(By.XPATH, "//div[text()='"+tab_name+"']")
     body = driver.find_element_by_css_selector('body')
 
     try:
         WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//div[text()=@tab_name]")))
+            EC.element_to_be_clickable((By.XPATH, "//div[text()='"+tab_name+"']")))
         # body.send_keys(Keys.ARROW_DOWN)
         # body.send_keys(Keys.ARROW_DOWN)
         # body.send_keys(Keys.ARROW_DOWN)
@@ -113,7 +116,7 @@ def go_to_procedure_detail(driver, tab_name):
     except (Exception,):
         try:
             WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//div[text()=@tab_name]")))
+                EC.element_to_be_clickable((By.XPATH, "//div[text()='"+tab_name+"']")))
             body.send_keys(Keys.ARROW_DOWN)
             body.send_keys(Keys.ARROW_DOWN)
             body.send_keys(Keys.ARROW_DOWN)
@@ -132,7 +135,7 @@ def go_to_procedure_detail(driver, tab_name):
             except:
                 try:
                     WebDriverWait(driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, "//div[text()=@tab_name]")))
+                        EC.element_to_be_clickable((By.XPATH, "//div[text()='"+tab_name+"']")))
                     #                    time.sleep(1)
                     element.click()
                 except:
@@ -162,6 +165,7 @@ def parse_lot(driver, url):
                                               '//div[@class="tender__content"]')))
     full_info = BeautifulSoup(driver.find_element(By.XPATH, '//div[@class="tender__content"]').get_attribute('innerHTML'),
                          "html.parser")
+    obj_dict['investmoscow_url'] = url
 
     # выбираем данные по площади и местоположению
     try:
@@ -171,19 +175,35 @@ def parse_lot(driver, url):
         print('Ошибка определения площади объекта ', url, exc)
         logging.info(f"Лот {url} - Ошибка определения площади объекта")
 
-    try:
-        obj_dict['lot_tag'] = full_info.find('div', class_="tender-card__header-label").text.strip()
-    except (Exception,):
-        obj_dict['lot_tag'] = np.nan
-        print('Ошибка определения номера лота объекта ', url, exc)
-        logging.info(f"Лот {url} - Ошибка определения номера лота объекта")
+    labels_info = full_info.find_all('div', class_="tender-card__header-label")
+    for label in labels_info:
+        if label.text.strip().startswith('#'):
+            try:
+                obj_dict['lot_tag'] = label.text.strip()
+            except Exception as exc:
+                obj_dict['lot_tag'] = np.nan
+                print('Ошибка определения номера лота объекта ', url, exc)
+                logging.info(f"Лот {url} - Ошибка определения номера лота объекта")
+        elif label.text.strip().startswith('Тип объекта:'):
+            try:
+                obj_dict['object_type'] = label.text.split(':')[-1].strip()
+            except Exception as exc:
+                obj_dict['object_type'] = np.nan
+                print('Ошибка определения типа объекта ', url, exc)
+                logging.info(f"Лот {url} - Ошибка определения типа объекта")
+        elif label.text.strip().startswith('Вид торгов:'):
+            try:
+                obj_dict['auct_type'] = label.text.split(':')[-1].strip()
+            except Exception as exc:
+                obj_dict['auct_type'] = np.nan
+                print('Ошибка определения вида торгов ', url, exc)
+                logging.info(f"Лот {url} - Ошибка определения вида торгов объекта")
 
     try:
         obj_dict['addr_string'] = full_info.find('div', class_="tender-card__description").div.next_sibling.text
     except Exception as exc:
         print('Ошибка определения адреса объекта ', url, exc)
         logging.info(f"Лот {url} - Ошибка определения адреса объекта")
-
 
     obj_desc = full_info.find('div', class_="subject-table")
     # данные из блока "Сведения об объекте"
@@ -193,37 +213,44 @@ def parse_lot(driver, url):
         label_text = block.find('div', class_="subject-table-label").text.strip()
         if label_text == 'Этаж:':
             try:
-                obj_dict['addr_floor'] = int(block.find('div', class_="subject-table-text").text)
+                obj_dict['addr_floor'] = int(block.find('div', class_="subject-table-text").text
+                                             .strip('№').strip('N').strip())
             except Exception as exc:
-                print(f"Лот {url} - Ошибка определения этажа объекта")
-                logging.info(f"Лот {url} - Ошибка определения этажа объекта")
+                if block.find('div', class_="subject-table-text").text != 'Не указано':
+                    print(f"Лот {url} - Ошибка определения этажа объекта")
+                    logging.info(f"Лот {url} - Ошибка определения этажа объекта")
 
         elif label_text == 'Этажность дома:':
             try:
                 obj_dict['total_floors'] = int(block.find('div', class_="subject-table-text").text)
             except Exception as exc:
-                print(f"Лот {url} - Ошибка определения этажности объекта")
-                logging.info(f"Лот {url} - Ошибка определения этажности объекта")
+                if block.find('div', class_="subject-table-text").text != 'Не указано':
+                    print(f"Лот {url} - Ошибка определения этажности объекта")
+                    logging.info(f"Лот {url} - Ошибка определения этажности объекта")
 
         elif label_text == 'Тип объекта:':
-            obj_dict['object_type'] = block.find('div', class_="subject-table-text").text
+            if not obj_dict['object_type']:
+                obj_dict['object_type'] = block.find('div', class_="subject-table-text").text
 
         elif label_text == 'Кадастровый номер:':
             obj_dict['cadastr_num'] = block.find('div', class_="subject-table-text").text
 
         elif label_text == 'Номер квартиры:':
             try:
-                obj_dict['flat_num'] = int(block.find('div', class_="subject-table-text").text)
+                obj_dict['flat_num'] = int(block.find('div', class_="subject-table-text").text
+                                           .strip('№').strip('N').strip())
             except Exception as exc:
-                print(f"Лот {url} - Ошибка определения номера квартиры объекта")
-                logging.info(f"Лот {url} - Ошибка определения номера квартиры объекта")
+                if block.find('div', class_="subject-table-text").text != 'Не указано':
+                    print(f"Лот {url} - Ошибка определения номера квартиры объекта")
+                    logging.info(f"Лот {url} - Ошибка определения номера квартиры объекта")
 
         elif label_text == 'Количество комнат:':
             try:
                 obj_dict['qty_rooms'] = int(block.find('div', class_="subject-table-text").text)
             except Exception as exc:
-                print(f"Лот {url} - Ошибка определения количества комнат объекта")
-                logging.info(f"Лот {url} - Ошибка определения количества комнат объекта")
+                if block.find('div', class_="subject-table-text").text != 'Не указано':
+                    print(f"Лот {url} - Ошибка определения количества комнат объекта")
+                    logging.info(f"Лот {url} - Ошибка определения количества комнат объекта")
     # переключаемся на "Сведения о процедуре"
 
     driver = go_to_procedure_detail(driver, 'Сведения о процедуре')
@@ -272,18 +299,13 @@ def parse_lot(driver, url):
         elif label_text == 'Форма проведения:':
             obj_dict['auct_form'] = block.find('div', class_="subject-table-text").text
 
-        elif label_text == 'Проведение торгов:':
-            obj_dict['auct_date'] = pd.to_datetime(
-                block.find('div', class_="subject-table-text").text.split()[0],
-                infer_datetime_format=True, format='%d.%m.%Y', errors='coerce')
-
         elif label_text == 'Дата начала приёма заявок:':
             obj_dict['start_applications_date'] = pd.to_datetime(
                 block.find('div', class_="subject-table-text").text.split()[0],
                 infer_datetime_format=True, format='%d.%m.%Y', errors='coerce')
 
         elif label_text == 'Дата окончания приёма заявок:':
-            obj_dict['finish_applications_date'] = pd.to_datetime(
+            obj_dict['finish_application_date'] = pd.to_datetime(
                 block.find('div', class_="subject-table-text").text.split()[0],
                 infer_datetime_format=True, format='%d.%m.%Y', errors='coerce')
 
@@ -303,44 +325,59 @@ def parse_lot(driver, url):
                 infer_datetime_format=True, format='%d.%m.%Y', errors='coerce')
 
         elif label_text == 'Ссылка на ЭТП:':
-            obj_dict['roseltorg_url'] = block.find('a')['href']
+            try:
+                obj_dict['roseltorg_url'] = block.find('a')['href']
+            except Exception as exc:
+                pass
 
         elif label_text == 'Ссылка на torgi.gov.ru:':
-            obj_dict['torgi_url'] = block.find('a')['href']
+            try:
+                obj_dict['torgi_url'] = block.find('a')['href']
+            except Exception as exc:
+                pass
 
 
     # переключаемся на "Дополнительная информация"
-
     driver = go_to_procedure_detail(driver, 'Дополнительная информация')
-
 
     wait.until(
         EC.visibility_of_element_located((By.XPATH,
                                           '//div[@class="tender__content"]')))
     full_info = BeautifulSoup(
-        driver.find_element(By.XPATH, '//div[@class="tender__content"]').get_attribute('innerHTML'),
+        driver.find_element(By.XPATH, '//div[@class="extra-info"]').get_attribute('innerHTML'),
         "html.parser")
-    obj_desc = full_info.find('div', class_="subject-table")
-    t1 = obj_desc.find_all('div', class_="subject-table-row")
+    #ищем блок "Транспортная доступность", проверяем наличие картинки метро, сохраняем название станции
+    trans_desc = full_info.find('div', class_="extra-info-transport")
+    metro_logo = trans_desc.find('img')['src']
+    if re.search('metro', metro_logo):
+        obj_dict['metro_station'] = trans_desc.div.div.div.text
 
+    # ищем блок "Инфраструктура"
+    infra_desc = full_info.find('div', class_="extra-info-block")
+    t1 = infra_desc.find_all('a', class_="extra-info-block-item uid-portal-link")
     for block in t1:
-        label_text = block.find('div', class_="subject-table-label").text.strip()
-
-        if label_text == 'Начальная цена за объект:':
-            try:
-                obj_dict['start_price'] = int(re.sub(r"\D", "",
-                                            block.find('div', class_="subject-table-text").text.split(
-                                                         ',')[0]))
-                obj_dict['start_price_m2'] = round(obj_dict['start_price'] / obj_dict['obj_square'], 2)
-            except Exception as exc:
-                print(f"Лот {url} - Ошибка определения стартовой цены объекта")
-                logging.info(f"Лот {url} - Ошибка определения стартовой цены объекта")
-
-
+        label_text = block.find('span').text.strip()
+        infra_item_meaning = int(block.find('div', class_="extra-info-block-item-text").text.strip())
+        if label_text == "Торговля":
+            obj_dict['inf_sales'] = infra_item_meaning
+        elif label_text == "Общественное питание":
+            obj_dict['inf_food_service'] = infra_item_meaning
+        elif label_text == "Образование":
+            obj_dict['inf_education'] = infra_item_meaning
+        elif label_text == "Культура и спорт":
+            obj_dict['inf_cult_and_sport'] = infra_item_meaning
+        elif label_text == "Бытовое обслуживание":
+            obj_dict['inf_consumer_services'] = infra_item_meaning
+        elif label_text == "Здравоохранение":
+            obj_dict['inf_health_care'] = infra_item_meaning
+        else:
+            print(f"Лот {url} - неучтенная инфраструктура - ", label_text, infra_item_meaning)
+            logging.info(f"Лот {url} - неучтенная инфрастурктура - "
+                         + label_text + str(infra_item_meaning))
 
     return driver, pd.Series(obj_dict)
 
-
+# -
 def control_lot(driver, url):
     """ Функция получает на вход URL лота с сайта investmoscow.ru.
         :param url: url лота
@@ -429,6 +466,7 @@ def primary_addr_normalize(line):
     adr_street = ''
     adr_house = ''
     adr_floor = np.nan
+    adr_apart_num = np.nan
     for _, paramValue in enumerate(addr_extractor.find(line).fact.parts):
         p0 = addr_extractor.find(line).fact.parts
     try:
@@ -436,46 +474,48 @@ def primary_addr_normalize(line):
             if p.type == 'город':
                 if p.value != 'Москва' and p.value != 'Москвы':
                     adr_street += str(', г. ' + p.value)
-            if p.type == 'деревня':
+            elif p.type == 'деревня':
                 adr_street += str(', д. ' + p.value)
-            if p.type == 'микрорайон':
+            elif p.type == 'микрорайон':
                 adr_street += str(', мкр. ' + p.value)
-            if p.type == 'бульвар':
+            elif p.type == 'бульвар':
                 adr_street += str(', б-р. ' + p.value)
-            if p.type == 'дачный поселок':
+            elif p.type == 'дачный поселок':
                 adr_street += str(', дп. ' + p.value)
-            if p.type == 'шоссе':
+            elif p.type == 'шоссе':
                 adr_street += str(', ш. ' + p.value)
-            if p.type == 'улица':
+            elif p.type == 'улица':
                 adr_street += str(', ул. ' + p.value)
-            if p.type == 'переулок':
+            elif p.type == 'переулок':
                 adr_street += str(', пер. ' + p.value)
-            if p.type == 'квартал':
+            elif p.type == 'квартал':
                 adr_street += str(', кв-л. ' + p.value)
-            if p.type == 'проезд':
+            elif p.type == 'проезд':
                 adr_street += str(', проезд. ' + p.value)
-            if p.type == 'проспект':
+            elif p.type == 'проспект':
                 adr_street += str(', пр-кт. ' + p.value)
-            if p.type == 'аллея':
+            elif p.type == 'аллея':
                 adr_street += str(', аллея. ' + p.value)
-            if p.type == 'площадь':
+            elif p.type == 'площадь':
                 adr_street += str(', пл. ' + p.value)
-            if p.type == 'набережная':
+            elif p.type == 'набережная':
                 adr_street += str(', наб. ' + p.value)
-            if p.type == 'село':
+            elif p.type == 'село':
                 adr_street += str(', с. ' + p.value)
-            if p.type == 'дом':
+            elif p.type == 'дом':
                 adr_house = str(', д. ' + p.value)
-            if p.type == 'корпус':
+            elif p.type == 'корпус':
                 adr_house = adr_house + str(', к. ' + p.value)
-            if p.type == 'строение':
+            elif p.type == 'строение':
                 adr_house = adr_house + str(', стр. ' + p.value)
-            if p.type == 'этаж':
+            elif p.type == 'этаж':
                 adr_floor = p.value
+            elif p.type == 'квартира':
+                adr_apart_num = p.value
         adr_street = 'г. Москва' + adr_street
-        ret = [adr_street, adr_house, adr_floor]
+        ret = [adr_street, adr_house, adr_floor, adr_apart_num]
     except:
-        ret = ['не распознан', 'не распознан', 'не распознан']
+        ret = ['не распознан', 'не распознан', 'не распознан', 'не распознан']
     return ret
 
 
@@ -493,7 +533,9 @@ def secondary_addr_normalize(line):
     adr_street = ''
     adr_house = ''
     adr_floor = np.nan
+    adr_apart_num = np.nan
         # загружаем свой словарь обработки нестандартных адресов
+    # TODO: заменить на csv
     conv_df = pd.read_excel(r'..\conv_dictionary.xlsx', sheet_name='dict', engine='openpyxl')
     for con_quest in conv_df.parsed_name:
         if re.search(con_quest, line) is not None:
@@ -517,21 +559,21 @@ def secondary_addr_normalize(line):
             if p.type == 'город':
                 if p.value != 'Москва' and p.value != 'Москвы':
                     adr_street += str(', г. ' + p.value)
-            if p.type == 'деревня':
+            elif p.type == 'деревня':
                 adr_street += str(', д. ' + p.value)
-            if p.type == 'микрорайон':
+            elif p.type == 'микрорайон':
                 adr_street += str(', мкр. ' + p.value)
-            if p.type == 'бульвар':
+            elif p.type == 'бульвар':
                 adr_street += str(', б-р. ' + p.value)
-            if p.type == 'дачный поселок':
+            elif p.type == 'дачный поселок':
                 adr_street += str(', дп. ' + p.value)
-            if p.type == 'поселок':
+            elif p.type == 'поселок':
                 adr_street += str(', п. ' + p.value)
-            if p.type == 'шоссе':
+            elif p.type == 'шоссе':
                 adr_street += str(', ш. ' + p.value)
-            if p.type == 'квартал':
+            elif p.type == 'квартал':
                 adr_street += str(', кв-л. ' + p.value)
-            if p.type == 'улица':
+            elif p.type == 'улица':
                 str_cons = p.value.split(' ')
                 if str_cons[0] == '43':
                     p.value = '43-й Армии'
@@ -575,7 +617,7 @@ def secondary_addr_normalize(line):
                 else:
                     adr_street += str(', ул. ' + p.value)
 
-            if p.type == 'переулок':
+            elif p.type == 'переулок':
                 str_cons = p.value.split(' ')
                 if str_cons[-1] in ('Б', 'М', 'Нов', 'Стар', 'Нижн', 'Верхн', 'Ср'):
                     p.value = p.value + '.'
@@ -602,7 +644,7 @@ def secondary_addr_normalize(line):
                 else:
                     adr_street += str(', пер. ' + p.value)
 
-            if p.type == 'проезд':
+            elif p.type == 'проезд':
                 str_cons = p.value.split(' ')
                 if str_cons[-1] in ('Б', 'М', 'Нов', 'Стар', 'Нижн', 'Верхн', 'Ср'):
                     p.value = p.value + '.'
@@ -624,11 +666,11 @@ def secondary_addr_normalize(line):
                 else:
                     adr_street += str(', проезд. ' + p.value)
 
-            if p.type == 'проспект':
+            elif p.type == 'проспект':
                 adr_street += str(', пр-кт. ' + p.value)
-            if p.type == 'аллея':
+            elif p.type == 'аллея':
                 adr_street += str(', аллея. ' + p.value)
-            if p.type == 'площадь':
+            elif p.type == 'площадь':
                 str_cons = p.value.split(' ')
                 if str_cons[-1] in ('Б', 'М', 'Нов', 'Стар', 'Нижн', 'Верхн', 'Ср'):
                     p.value = p.value + '.'
@@ -639,26 +681,29 @@ def secondary_addr_normalize(line):
                     adr_street += str(', пл. ' + adr + 'Б.')
                 else:
                     adr_street += str(', пл. ' + p.value)
-            if p.type == 'набережная':
+            elif p.type == 'набережная':
                 adr_street += str(', наб. ' + p.value)
-            if p.type == 'село':
+            elif p.type == 'село':
                 adr_street += str(', с. ' + p.value)
-            if p.type == 'дом':
+            elif p.type == 'дом':
                 adr_house = str(', д. ' + p.value)
-            if p.type == 'корпус':
+            elif p.type == 'корпус':
                 adr_house = adr_house + str(', к. ' + p.value)
-            if p.type == 'строение':
+            elif p.type == 'строение':
                 adr_house = adr_house + str(', стр. ' + p.value)
-            if p.type == 'этаж':
+            elif p.type == 'этаж':
                 adr_floor = p.value
+            elif p.type == 'квартира':
+                adr_apart_num = p.value
+
         adr_street = re.sub('ё', 'е', adr_street)
         adr_street = 'г. Москва' + adr_street
-        ret = [adr_street, adr_house, adr_floor]
+        ret = [adr_street, adr_house, adr_floor, adr_apart_num]
     except:
-        return ['не распознан', 'не распознан', 'не распознан']
+        return ['не распознан', 'не распознан', 'не распознан', 'не распознан']
     return ret
 
-
+# -
 def secondary_addr_normalize_for_metrodistance(line):
     """
     Функция углубленной нормализации адреса. Получает на вход строку адреса и пытается ее распарсить,
@@ -686,21 +731,21 @@ def secondary_addr_normalize_for_metrodistance(line):
         if p.type == 'город':
             if p.value != 'Москва' and p.value != 'Москвы':
                 adr_street += str(', г. ' + p.value)
-        if p.type == 'деревня':
+        elif p.type == 'деревня':
             adr_street += str(', д. ' + p.value)
-        if p.type == 'микрорайон':
+        elif p.type == 'микрорайон':
             adr_street += str(', мкр. ' + p.value)
-        if p.type == 'бульвар':
+        elif p.type == 'бульвар':
             adr_street += str(', б-р. ' + p.value)
-        if p.type == 'дачный поселок':
+        elif p.type == 'дачный поселок':
             adr_street += str(', дп. ' + p.value)
-        if p.type == 'поселок':
+        elif p.type == 'поселок':
             adr_street += str(', п. ' + p.value)
-        if p.type == 'шоссе':
+        elif p.type == 'шоссе':
             adr_street += str(', ш. ' + p.value)
-        if p.type == 'квартал':
+        elif p.type == 'квартал':
             adr_street += str(', кв-л. ' + p.value)
-        if p.type == 'улица':
+        elif p.type == 'улица':
             str_cons = p.value.split(' ')
             if str_cons[0] == '43':
                 p.value = '43-й Армии'
@@ -731,7 +776,7 @@ def secondary_addr_normalize_for_metrodistance(line):
                 adr_street += str(', ул. ' + adr + 'Верхн.')
             else:
                 adr_street += str(', ул. ' + p.value)
-        if p.type == 'переулок':
+        elif p.type == 'переулок':
             str_cons = p.value.split(' ')
             if len(str_cons) > 1 and re.search(r'\d+-[й]', str_cons[0]) is not None:
                 adr = ''
@@ -745,7 +790,7 @@ def secondary_addr_normalize_for_metrodistance(line):
                 adr_street += str(', пер. ' + adr + 'Ср.')
             else:
                 adr_street += str(', пер. ' + p.value)
-        if p.type == 'проезд':
+        elif p.type == 'проезд':
             str_cons = p.value.split(' ')
             if len(str_cons) > 1 and re.search(r'\d+-[й]', str_cons[0]) is not None:
                 adr = ''
@@ -764,28 +809,28 @@ def secondary_addr_normalize_for_metrodistance(line):
                 adr_street += str(', проезд. ' + adr + 'Б.')
             else:
                 adr_street += str(', проезд. ' + p.value)
-        if p.type == 'проспект':
+        elif p.type == 'проспект':
             adr_street += str(', пр-кт. ' + p.value)
-        if p.type == 'аллея':
+        elif p.type == 'аллея':
             adr_street += str(', аллея. ' + p.value)
-        if p.type == 'площадь':
+        elif p.type == 'площадь':
             adr_street += str(', пл. ' + p.value)
-        if p.type == 'набережная':
+        elif p.type == 'набережная':
             adr_street += str(', наб. ' + p.value)
-        if p.type == 'село':
+        elif p.type == 'село':
             adr_street += str(', с. ' + p.value)
-        if p.type == 'дом':
+        elif p.type == 'дом':
             adr_house = str(', д. ' + p.value)
-        if p.type == 'корпус':
+        elif p.type == 'корпус':
             adr_house = adr_house + str(', к. ' + p.value)
-        if p.type == 'строение':
+        elif p.type == 'строение':
             adr_house = adr_house + str(', стр. ' + p.value)
     adr_street = re.sub('ё', 'е', adr_street)
     adr_street = 'г. Москва' + adr_street
     ret = adr_street + adr_house
     return ret
 
-
+# -
 def clean_gkh_add(path: str, sheet_name: str = "Sheet1"):
     """
     Функция очистки данных в конкретном листе.
@@ -797,7 +842,7 @@ def clean_gkh_add(path: str, sheet_name: str = "Sheet1"):
     wb[sheet_name].delete_rows(2, 1000)
     wb.save(path)
 
-
+# -
 def add_unrecognized():
     """ Функция добавляет данные из файла new_buildings.xlsx в базу ЖКХ, сохраняет в csv всю базу,
         удаляет импортированные записи из файла new_buildings.xlsx.
@@ -808,30 +853,19 @@ def add_unrecognized():
     gkh_add = pd.read_excel(r'..\new_buildings.xlsx', sheet_name='Sheet1', engine='openpyxl', keep_default_na=False)
     gkh_df = gkh_df.append(gkh_add, ignore_index=True)
     gkh_df = gkh_df.drop_duplicates(subset=['address_w'], keep='last')
-    gkh_df.to_csv('buildings_oper.csv', index=False)
+    gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
     clean_gkh_add(r'..\new_buildings.xlsx', sheet_name='Sheet1')
 
 
-def update_gkh_base(address, res_str):
+def update_gkh_base(address, res):
     """ обновление информации по адресу в базе ЖКХ.
         Не забыть скачать базу до и сохранить в файл после работы  """
-    gkh_df.loc[gkh_df.address_w == address, 'num_floors'] = res_str[0]
-    if res_str[1] != '':
-        gkh_df.loc[gkh_df.address_w == address, 'metro_name_gkh'] = res_str[1]
-    else:
-        gkh_df.loc[gkh_df.address_w == address, 'metro_name_gkh'] = np.nan
-    if res_str[3] != '':
-        gkh_df.loc[gkh_df.address_w == address, 'metro_minutes'] = res_str[3]
-    else:
-        gkh_df.loc[gkh_df.address_w == address, 'metro_minutes'] = np.nan
-    gkh_df.loc[gkh_df.address_w == address, 'metro_km'] = res_str[2]
-    try:
-        gkh_df.loc[gkh_df.address_w == address, 'year_exp_w'] = int(res_str[4])
-    except (Exception, ):
-        print('год не удалось сохранить')
-        logging.info('год не удалось сохранить')
+    global gkh_df
+    gkh_df = pd.concat([gkh_df, pd.DataFrame.from_records([res])] ,ignore_index=True)
+    gkh_df.drop_duplicates(subset=['gkh_address'], keep='last', inplace=True, ignore_index=True)
+    gkh_df.reset_index(drop=True, inplace=True)
 
-
+# -
 def update_new_buildings(path: str, _df, startcol: int = 1, startrow: int = 1, sheet_name: str = "Sheet1"):
     """Функция добавления данных в new_buildings.
     :param path: Путь до файла Excel
@@ -847,21 +881,23 @@ def update_new_buildings(path: str, _df, startcol: int = 1, startrow: int = 1, s
             wb[sheet_name].cell(startrow + ir, startcol + ic).value = _df.iloc[ir][ic]
     wb.save(path)
 
-
-def metro_and_floor_data(address_w):
+# -
+def metro_and_floor_data(addr_norm):
     """ Функция поиска данных об адресе на ресурсе flatInfo.ru (этажность и расстояние до метро)
     Функция дополнительно обновляет базу ЖКХ update_gkh_base    """
     global gkh_df
 
-    print(address_w)
-    logging.info(str(address_w))
-    res = [np.nan for _ in range(5)]
+    print(addr_norm)
+    logging.info(str(addr_norm))
+    #res = [np.nan for _ in range(5)]
+    res = {GKH_FIELDS[i]: np.nan for i in range(len(GKH_FIELDS))}
     try:
         driver = start_browser_for_parse()
         driver.get('https://flatinfo.ru')
         element = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/input[1]")
-        adr1 = re.sub('проезд.', 'проезд', address_w)
+        adr1 = re.sub('проезд.', 'проезд', addr_norm)
         adr1 = re.sub('пр-кт.', 'проспект', adr1)
+        adr1 = re.sub('г. зеленоград, к.', 'г. зеленоград,', adr1)
         element.send_keys(adr1)
         time.sleep(3)
         butt = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/button[1]")
@@ -877,83 +913,172 @@ def metro_and_floor_data(address_w):
         print(cur_url)
         logging.info(str(cur_url))
         # если переход произошел на страницу с данными о доме
+        if re.search('h_info', cur_url) is None:
+            print('адреса не совпадают')
+            logging.info('адреса не совпадают')
+            print('Ввести правильный url?')
+            is_cont = input()
+            if is_cont in ['Y', 'y']:
+                print('Введите правильный url')
+                new_url = input()
+                driver.get(new_url)
+                cur_url = new_url
+
         if re.search('h_info', cur_url) is not None:
-            addr_line = re.sub(' в Москве', '',
-                               driver.find_element(By.XPATH, "//h1[starts-with(text(), 'О доме')]").text)
+            full_addr_str = driver.find_element(By.XPATH, "//h1[starts-with(text(), 'О доме')]").text
+            addr_line = full_addr_str.split(' в ')[0]
+            # addr_line = re.sub(' в Москве', '',full_addr_str)
+            # addr_line = re.sub(' в Зеленограде', '', addr_line)
+            # addr_line = re.sub(' в Зеленограде', '', addr_line)
+            addr_line = re.sub(' ЗЕЛЕНОГРАД Г.', ' г. Зеленоград ', addr_line)
             parse_addr_line = secondary_addr_normalize_for_metrodistance(addr_line)
-            if (parse_addr_line.lower()) != address_w:
+            parse_addr_line = re.sub(' г. Зеленоград, д.', ' г. Зеленоград, к.', parse_addr_line)
+
+            if (parse_addr_line.lower()) != addr_norm:
                 print('адреса не совпадают')
                 logging.info('адреса не совпадают')
-                driver.quit()
-                return res
+                print('Ввести правильный url?')
+                is_cont = input()
+                if is_cont in ['Y', 'y']:
+                    print('Введите правильный url')
+                    new_url = input()
+                    driver.get(new_url)
+                    # if re.search('h_info', new_url) is not None:
+                    #     addr_line = re.sub(' в Москве', '',
+                    #                        driver.find_element(By.XPATH, "//h1[starts-with(text(), 'О доме')]").text)
+                    #     parse_addr_line = secondary_addr_normalize_for_metrodistance(addr_line)
+                    #     if (parse_addr_line.lower()) != addr_norm:
+                    #         print('адреса нового url не совпадают')
+                    #         logging.info('адреса нового url не совпадают')
+                    #         driver.quit()
+                    #         return res
+                    cur_url = new_url
+                else:
+                    driver.quit()
+                    return res
             print('адреса норм')
             logging.info('адреса норм')
+            res['gkh_address'] = addr_norm
+
             try:
                 r = requests.get(cur_url)
+                res['building_page_url'] = cur_url
                 soup = BeautifulSoup(r.text, 'lxml')
                 # скачиваем страницу инфы о доме
                 full_info = soup.find('div', class_='page__content')
                 li_blocks = full_info.find_all('li', class_='fi-list__item fi-list-item')
                 # и ищем характеристики этажности
                 for li_bl in li_blocks:
-#                    q = li_bl.text.strip('\n').split(':')
-#                     if q[0] == 'Этажей всего':
-#                         res[0] = q[1].strip('\n').split('\n')[0]
-#                     if q[0] == 'Год постройки':
-#                         res[4] = q[1].strip('\n').strip()
-                    if li_bl.find('span', class_='fi-list-item__label').text == 'Этажей всего':
-                        t1 = li_bl.find('span', class_='fi-list-item__value').text
-                        t2 = t1.strip('\r').strip('\n').strip('\t').split('\n')
+                    try:
+                        label_text = li_bl.find('span', class_='fi-list-item__label').text.strip()
+                        param_value = li_bl.find('span', class_='fi-list-item__value').text.strip()
+                    except:
+                        continue
+
+                    if label_text == 'Этажей всего':
+                        t2 = param_value.strip('\r').strip('\n').strip('\t').split('\n')
                         t3 = t2[0].strip()
-                        res[0] = t3
-                        # res[0] = li_bl.find('span', class_='fi-list-item__value').text\
-                        #                 .strip('\n').split('\n')[0].strip()
-                    if li_bl.find('span', class_='fi-list-item__label').text == 'Год постройки':
-                        res[4] = li_bl.find('span', class_='fi-list-item__value').text\
-                                        .strip('\n').strip()
+                        res['gkh_total_floors'] = t3
+
+                    elif label_text == 'Год постройки':
+                        try:
+                            res['construction_year'] = int(param_value.strip('\n').strip())
+                        except Exception as exc:
+                            print(addr_norm, 'ошибка определения года постройки ', param_value)
+                            logging.info(f'{addr_norm} ошибка определения года постройки {param_value}')
+                    elif label_text == 'Округ':
+                        res['adm_area'] = param_value.strip('\n').strip()
+                    elif label_text == 'Район':
+                        res['mun_district'] = param_value.strip('\n').strip()
+                    elif label_text == 'Гео-координаты':
+                        try:
+                            res['geo_lat'] = float(param_value.strip('\n').split('/')[0].strip())
+                            res['geo_lon'] = float(param_value.strip('\n').split('/')[1].strip())
+                        except Exception as exc:
+                            print(addr_norm, 'ошибка определения координат ', param_value)
+                            logging.info(f'{addr_norm} ошибка определения координат {param_value}')
+                    elif label_text == 'Перекрытия':
+                        res['overlap_material'] = param_value.strip('\n').strip()
+                    elif label_text == 'Каркас':
+                        res['skeleton'] = param_value.strip('\n').strip()
+                    elif label_text == 'Стены':
+                        res['wall_material'] = param_value.strip('\n').strip()
+                    elif label_text == 'Категория':
+                        res['category'] = param_value.strip('\n').strip()
+                    elif label_text == 'Лифтов в подъезде' or \
+                            label_text == 'Пассажирских лифтов в подъезде':
+                        res['passenger_elevators_qty'] = param_value.strip('\n').strip()
+                    elif label_text == 'Состояние':
+                        res['condition'] = param_value.strip('\n').strip()
+                    elif label_text == 'Кадастровый номер дома':
+                        res['gkh_cadastr_num'] = param_value.strip('\n').strip()
+                    elif label_text == 'Высота потолков':
+                        try:
+                            res['ceiling_height'] = int(param_value.strip('\n').strip().split(' ')[0])
+                        except Exception as exc:
+                            print('Ошибка определения высоты потолков - ', param_value)
+                    elif label_text == 'Код адреса КЛАДР':
+                        res['code_KLADR'] = param_value.strip('\n').strip()
+                    elif label_text == 'Расселение по реновации':
+                        if not re.search('не включен', param_value.lower()):
+                            res['is_renov'] = 1
+                            value_lst = param_value.strip('\n').strip().split(' ')
+                            res['renov_period'] = value_lst[-4] + '-' + value_lst[-2]
+                    elif label_text == 'Проживает':
+                        try:
+                            res['residents_qty'] = int(param_value.strip('\n').strip().split(' ')[0])
+                        except Exception as exc:
+                            print(addr_norm, 'ошибка определения количества проживающих ', param_value)
+                            logging.info(f'{addr_norm} ошибка определения количества проживающих {param_value}')
+                    else:
+                        if re.search('ремонт', label_text):
+                            print(addr_norm, 'упоминание капремонта  ', label_text, param_value)
+                            logging.info(f'{addr_norm} упоминание капремонта {label_text} {param_value}')
+
+                try:
+                    transport_data = full_info.find('ul', class_='fi-list underground')
+                    transp_bl = transport_data.find_all('li', class_='fi-list__item fi-list-item')
+                    for bl in transp_bl:
+                        is_walking_distance = bl.find('svg',
+                                                    class_='location__how-label icon-svg').contents[1]
+                        if re.search('#walking', str(is_walking_distance)):
+                            res['gkh_metro_station'] = bl.find('span',
+                                                               class_='fi-list-item__label').text.strip()
+                            res['metro_min'] = int(bl.find('span',
+                                                           class_='location__time').text
+                                            .strip().split('\xa0')[0])
+                            res['metro_km'] = round(float(bl.find('span',
+                                                                  class_='fi-list-item__value')
+                                            .text.strip().split(' ')[-2])/1000, 2)
+                            break
+                        print()
+                except Exception as exc:
+                    pass
 
             except (Exception, ):
                 print('данные о доме не получены')
                 logging.info('данные о доме не получены')
-
-            cur_url = cur_url.replace('info1', 'info2')
-            r = requests.get(cur_url)
-            soup = BeautifulSoup(r.text, 'lxml')
-            try:
-                full_info = soup.find_all('div', class_='col-md-6')
-                metro_info = ['нет данных', 'нет данных', 'нет данных']
-                for bl in full_info:
-                    if bl.find('h2').text == 'Метро рядом':
-                        metro_bl = bl.find_all('td')
-                        metro_info = []
-                        for block in metro_bl[:3]:
-                            metro_info.append(block.text)
-                res[1] = metro_info[0]
-                if metro_info[1] != 'нет данных':
-                    res[2] = round(float(metro_info[1].split()[0])/1000, 2)
-                if metro_info[2] != 'нет данных':
-                    res[3] = int(metro_info[2].split()[0])
-            except (Exception, ):
-                pass
         driver.quit()
-    except (Exception, ):
-        pass
-    try:
-        driver.quit()
-    except (Exception, ):
-        pass
-    update_gkh_base(address_w, res)
+    except Exception as exc:
+        print (exc)
+    # try:
+    #     driver.quit()
+    # except (Exception, ):
+    #     pass
+    if pd.isna(res['gkh_metro_station']):
+        res['gkh_metro_station'] = 'Нет'
+    if pd.isna(res['is_renov']):
+        res['is_renov'] = 0
+    if not pd.isna(res['building_page_url']):
+        update_gkh_base(addr_norm, res)
+    else:
+        print('Не получен ', res)
+        logging.info(f'Объект {res} не получен')
     print(res)
     logging.info(f'Объект {res}')
-    if sum(pd.isna(res)) == 5:
-        print('данные об объекте', address_w, ' не получены')
-        logging.info('данные об объекте' + str(address_w) + ' не получены')
-    if 0 < sum(pd.isna(res)) < 5:
-        print('данные об объекте', address_w, ' не полные')
-        logging.info('данные об объекте' + str(address_w) + ' не полные')
     return res
 
-
+# -
 def renov_fill(ser):
     if str(ser[0]) != 'nan':
         return ser[0]
@@ -964,7 +1089,7 @@ def renov_fill(ser):
     else:
         return 'N/A'
 
-
+# -
 def max_floor(st):
     """ Функция очистки данных об этажности. Возвращает последнее число из строки и переводит в int"""
     try:
@@ -972,7 +1097,7 @@ def max_floor(st):
     except (Exception, ):
         return 0
 
-
+# -
 def qty_rooms_predict(ser):
     """ Функция предсказывает количествокомнат исходя из данных переданной серии pd.Series
         на обученном классификаторе дерева решений clf
@@ -991,7 +1116,7 @@ def qty_rooms_predict(ser):
         ser.loc['is_qty_rooms_predicted'] = 0
     return ser
 
-
+# -
 def update_spreadsheet_hist(path: str, _df, startcol: int = 1, startrow: int = 1, sheet_name: str = "Прошедшие"):
     """Функция перезаписи данных в конкретный лист "Прошедшие".
     :param path: Путь до файла Excel
@@ -1053,7 +1178,7 @@ def start_browser_for_parse():
     return driver
 
 
-def get_url_list_from_page(driver, cur_page_url):
+def get_url_list_from_page(driver, cur_page_url, is_active):
     """ Функция получения списка URL всех лотов на странице cur_page_url
         При открытии страницы разворачивает все svg-объекты.
     :param driver: работающий в программе WebDriver
@@ -1114,8 +1239,14 @@ def get_url_list_from_page(driver, cur_page_url):
     soup = BeautifulSoup(driver.find_element(By.XPATH, '//div[@class="list"]').get_attribute('innerHTML'),
                          "html.parser")
     nfo = soup.find_all('a', attrs={"class": "uid-tenders-card__main"})
+    today = pd.to_datetime('today')
     for el in nfo:
-        url_page_lst.append('https://investmoscow.ru' + el['href'])
+        deadline = el.find('div', attrs={"class": "uid-text-small uid-text-gray"})\
+                        .span.text.split(',')[0]
+        deadline_date = datetime.datetime.strptime(deadline, "%d.%m.%Y").date()
+        if (is_active and deadline_date>today) or (not is_active and deadline_date<=today):
+            url_page_lst.append('https://investmoscow.ru' + el['href'])
+
     return driver, url_page_lst
 
 
@@ -1137,11 +1268,7 @@ def reparsing_unreadable_urls(driver, lot_df, qty_lots, unreadable_urls):
             for url in tqdm(oper_lst):
                 # считываем страницу с заданным URL
                 try:
-                    # page = requests.get(url, timeout=60)
-                    # soup = BeautifulSoup(page.text, "html.parser")
-                    # lot_single = parse_lot(soup, is_actual=is_actual_lots)
                     driver, lot_single = parse_lot(driver, url)
-                    lot_single['investMSK_URL'] = url
                     lot_df = pd.concat([lot_df, lot_single.to_frame().T], ignore_index=True)
                     unreadable_urls.remove(url)
                 except (Exception,):
@@ -1167,7 +1294,7 @@ def drop_duplicated_lots(lot_df):
         :return: датафрейм с уникальными лотами. Выводит данные о количестве уникальных лотов.
     """
     # поиск дублирующихся лотов
-    last_dup = lot_df[lot_df.duplicated(['lot_tag'], keep=False)].sort_values('auct_date')
+    last_dup = lot_df[lot_df.duplicated(['lot_tag'], keep=False)].sort_values('bidding_date')
     last_dup = last_dup.drop_duplicates(subset=['lot_tag'], keep='last')
     # удаляем дублирующиеся лоты по тагу
     lot_df = lot_df.drop_duplicates(subset=['lot_tag'], keep=False, ignore_index=True)
@@ -1177,7 +1304,7 @@ def drop_duplicated_lots(lot_df):
     logging.info(f'Количество уникальных объектов: {len(lot_df)}')
     return lot_df
 
-
+# -
 def compare_with_final_df(lot_df, final_df):
     lot_df = lot_df.merge(final_df[['lot_tag', 'addr_norm']].rename(columns={'addr_norm':'is_present'}),
                           how='left', on='lot_tag')
@@ -1185,7 +1312,7 @@ def compare_with_final_df(lot_df, final_df):
     lot_df = lot_df.drop(columns=['is_present'])
     return lot_df
 
-
+# -
 def recognize_and_normalize_addresses(norm_df):
     """ Функция нормализации адресов датафрейма (приведения к единому стандарту).
         Сравниваются адреса, полученные с помощью NER-модуля Natasha из объявлений, с адресами в базе ЖКХ.
@@ -1199,24 +1326,25 @@ def recognize_and_normalize_addresses(norm_df):
     # считываем базу адресов с указанием года постройки и ссылки на дом (далее - база ЖКХ)
     print('Считывается база ЖКХ')
     logging.info('Считывается база ЖКХ')
-    gkh_df = pd.read_csv('buildings_oper.csv')
-    gkh_df['address_w'] = gkh_df.address_w.apply(lambda x: str(x).lower())
+    gkh_df = pd.read_csv(GKH_BASE_FILENAME)
+    gkh_df['gkh_address'] = gkh_df.gkh_address.apply(lambda x: str(x).lower())
 
     # проводим первичную нормализацию адресов датафрейма
     print('Первичная нормализация адресов датафрейма')
     logging.info('Первичная нормализация адресов датафрейма')
-    norm_df.loc[:, 'addr_street'], norm_df.loc[:, 'addr_build_num'], norm_df.loc[:, 'addr_floor_from_title'] = zip(
-        *norm_df.loc[:, 'addr_string'].progress_apply(primary_addr_normalize))
+    norm_df.loc[:, 'addr_street'], norm_df.loc[:, 'addr_build_num'], \
+        norm_df.loc[:, 'addr_floor_from_title'], norm_df.loc[:, 'addr_apart_num_from_title'] = zip(
+            *norm_df.loc[:, 'addr_string'].progress_apply(primary_addr_normalize))
 
     # добавляем колонки с нормализованным адресом, и приведенным к нижнему регистру
     # по приведенному к нижнему регистру адресу пытаемся сджойнить с базой ЖКХ.
     norm_df['addr_norm'] = norm_df['addr_street'] + norm_df['addr_build_num']
     norm_df['addr_norm_lower'] = norm_df['addr_norm'].apply(lambda x: str(x).lower())
-    norm_df = norm_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='address_w')
+    norm_df = norm_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='gkh_address')
 
     # выделяем из базы строки, для которых не нашлось соответствия в базе ЖКХ
-    quest_df = norm_df[norm_df.address_w.isna()]
-    norm_df = norm_df.drop(norm_df[norm_df.address_w.isna()].index)
+    quest_df = norm_df[norm_df.gkh_address.isna()]
+    norm_df = norm_df.drop(norm_df[norm_df.gkh_address.isna()].index)
 
     # создаем цикл обработки необработанных адресов
     if len(quest_df) > 0:
@@ -1229,80 +1357,70 @@ def recognize_and_normalize_addresses(norm_df):
         print('Повторная нормализация необработанных ранее адресов датафрейма')
         logging.info('Повторная нормализация необработанных ранее адресов датафрейма')
         print('Считывается база ЖКХ')
-        gkh_df = pd.read_csv('buildings_oper.csv')
-        gkh_df['address_w'] = gkh_df.address_w.apply(lambda x: str(x).lower())
+        gkh_df = pd.read_csv(GKH_BASE_FILENAME)
+        gkh_df['gkh_address'] = gkh_df.gkh_address.apply(lambda x: str(x).lower())
         # убираем из нее ранее добавленные данные из ЖКХ (чтобы потом повторно попробовать сджойнить)
-        quest_df = quest_df.drop(
-            columns=['address_w', 'adm_area', 'mun_district', 'year_exp_w', 'building_page', 'metro_minutes',
-                     'num_floors', 'metro_name_gkh', 'metro_km'])
+        quest_df = quest_df.drop(columns=GKH_FIELDS)
         # проводим повторную нормализацию адресов датафрейма
-        quest_df.loc[:, 'addr_street'], quest_df.loc[:, 'addr_build_num'], quest_df.loc[:, 'addr_floor_from_title'] \
+        quest_df.loc[:, 'addr_street'], quest_df.loc[:, 'addr_build_num'], \
+            quest_df.loc[:, 'addr_floor_from_title'], quest_df.loc[:, 'addr_apart_num_from_title'] \
             = zip(*quest_df.loc[:, 'addr_string'].progress_apply(secondary_addr_normalize))
         # добавляем колонки с нормализованным адресом, и приведенным к нижнему регистру
         # по приведенному к нижнему регистру адресу пытаемся сджойнить с базой ЖКХ.
         quest_df['addr_norm'] = quest_df['addr_street'] + quest_df['addr_build_num']
         quest_df['addr_norm_lower'] = quest_df['addr_norm'].apply(lambda x: str(x).lower())
-        quest_df = quest_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='address_w')
+        quest_df = quest_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='gkh_address')
         # те строки, которые получилось сджойнить, добавляем в norm_df
-        norm_df = norm_df.append(quest_df.query('addr_norm_lower == address_w'))
-        quest_df = quest_df.query('addr_norm_lower != address_w')
+        norm_df = norm_df.append(quest_df.query('addr_norm_lower == gkh_address'))
+        quest_df = quest_df.query('addr_norm_lower != gkh_address')
         if len(quest_df) == 0:
             break
         else:
             print('Нераспознанных адресов: ', len(quest_df))
             logging.info(f'Нераспознанных адресов: {len(quest_df)}')
             # новая версия - выдает на печать только по одной паре реальный адрес / распознанный
-            # quest_df = quest_df.reset_index(drop=True)
             quest_df = quest_df.reset_index(drop=True)
             quest_df_sample = quest_df.drop_duplicates(subset=['addr_norm_lower']).copy()
-            for i in range(len(quest_df_sample)):
+            for i, row in quest_df_sample.iterrows():
                 try:
-                    print(quest_df_sample.iloc[i,[7, 17]].values)
-                    logging.info(f'{quest_df_sample.iloc[i,[7, 17]]}.values')
-                except Exception as e:
-                    logging.info(f'Ошибка: {traceback.format_exc()}')
-
-            print('Если нормализованный адрес совпадает с адресом в строке объявления - ')
-            print('заполните форму в файле new_buildings.xlsx. !!!! НЕ ЗАБУДЬТЕ ЗАКРЫТЬ ФАЙЛ')
-            print('(после добавления данных в основную базу содержимое файла будет удалено)')
-            print()
-            print('Если нормализованный адрес распознан неверно - можно попытаться преобразовать его')
-            print('для этого запустите файл addr_test.exe, скопируйте туда строку нераспознанного адреса')
-            print('Если получилось преобразовать ее для нормального распознавания - внесите изменения в conv_dict.xlsx')
-            print()
-            print()
-            print('После внесения изменений в данные            - нажмите \'Y\'')
-            print('или продолжить без данных по этим адресам    - нажмите \'N\'')
-            is_cont = input()
-            while is_cont not in ['Y', 'y', 'N', 'n']:
-                print('Некорректный ввод. Повторите выбор (Y/N)')
-                is_cont = input()
-            if is_cont in ['Y', 'y']:
-                add_unrecognized()
-                quest_df = quest_df.drop(
-                    columns=['address_w', 'adm_area', 'mun_district', 'year_exp_w', 'building_page', 'metro_minutes',
-                             'num_floors', 'metro_name_gkh', 'metro_km', 'address_w'])
-                quest_df['addr_norm_lower'] = quest_df['addr_norm'].apply(lambda x: str(x).lower())
-                quest_df = quest_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='address_w')
-                norm_df = norm_df.append(quest_df.query('addr_norm_lower == address_w'))
-                quest_df = quest_df.query('addr_norm_lower != address_w')
-                if len(quest_df) == 0:
-                    print('Все адреса распознаны')
-                    logging.info('Все адреса распознаны')
-                    loop_flag = False
-                else:
-                    print('Продолжить попытки распознавания адресов? (Y/N')
+                    print(row['addr_string'])
+                    print(row['addr_norm_lower'])
+                    print('Если нормализованный адрес совпадает с адресом в строке объявления - нажмите Y')
                     is_cont = input()
                     while is_cont not in ['Y', 'y', 'N', 'n']:
                         print('Некорректный ввод. Повторите выбор (Y/N)')
                         is_cont = input()
-                    if is_cont in ['N', 'n']:
-                        loop_flag = False
-            else:
+                    if is_cont in ['Y', 'y']:
+                        new_addr_dict = {'gkh_address': row['addr_norm_lower']}
+                        gkh_df = pd.concat([gkh_df, pd.DataFrame.from_records([new_addr_dict])] ,ignore_index=True)
+                except Exception as e:
+                    logging.info(f'Ошибка: {traceback.format_exc()}')
+            gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
+
+
+            # TODO: откорректировать поиск нераспознанных
+#                add_unrecognized()
+            quest_df = quest_df.drop(columns=GKH_FIELDS)
+            quest_df['addr_norm_lower'] = quest_df['addr_norm'].apply(lambda x: str(x).lower())
+            quest_df = quest_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='gkh_address')
+            norm_df = norm_df.append(quest_df.query('addr_norm_lower == gkh_address'))
+            quest_df = quest_df.query('addr_norm_lower != gkh_address')
+            if len(quest_df) == 0:
+                print('Все адреса распознаны')
+                logging.info('Все адреса распознаны')
                 loop_flag = False
+            else:
+                print('Продолжить попытки распознавания адресов? (Y/N')
+                is_cont = input()
+                while is_cont not in ['Y', 'y', 'N', 'n']:
+                    print('Некорректный ввод. Повторите выбор (Y/N)')
+                    is_cont = input()
+                if is_cont in ['N', 'n']:
+                    loop_flag = False
+
     return norm_df
 
-
+# -
 def is_metro_and_floor_data_complete(norm_df):
     """ Функция проверки полноты данных о привязке к метро и этажности зданий. При отсутствии данных в базе ЖКХ -
         запускается попытка скачать с сайта FlatInfo.ru, при невозможности - дает возможность доплнения данных
@@ -1312,52 +1430,29 @@ def is_metro_and_floor_data_complete(norm_df):
     """
     print('Проверка наличия данных о метро и этажности зданий')
     logging.info('Проверка наличия данных о метро и этажности зданий')
-    out_of_data = norm_df[norm_df.metro_name_gkh.isna() | norm_df.num_floors.isna() | norm_df.year_exp_w.isna()] \
+    out_of_data = norm_df[norm_df.gkh_metro_station.isna() | norm_df.gkh_total_floors.isna() | norm_df.construction_year.isna()] \
         .drop_duplicates(subset=['addr_norm'], keep='last')
     if out_of_data.shape[0] != 0:
         print('Отсутвуют данные по ', len(out_of_data), ' объектам')
         logging.info(f'Отсутвуют данные по {len(out_of_data)} объектам')
         print('Дождитесь окончания сбора и сохранения данных')
-        out_of_data.progress_apply(lambda x: metro_and_floor_data(x.address_w), axis=1)
-        gkh_df.to_csv('buildings_oper.csv', index=False)
+        out_of_data.progress_apply(lambda x: metro_and_floor_data(x.gkh_address), axis=1)
+        gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
         print('Данные сохранены')
         logging.info('Данные сохранены')
-        norm_df = norm_df.drop(
-            columns=['address_w', 'adm_area', 'mun_district', 'year_exp_w', 'building_page', 'metro_minutes',
-                     'num_floors', 'metro_name_gkh', 'metro_km'])
-        norm_df = norm_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='address_w')
-        out_of_data = norm_df[norm_df.metro_name_gkh.isna() | norm_df.num_floors.isna()] \
+        norm_df = norm_df.drop(columns=GKH_FIELDS)
+        norm_df = norm_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='gkh_address')
+        out_of_data = norm_df[
+            norm_df.gkh_metro_station.isna() | norm_df.gkh_total_floors.isna() | norm_df.construction_year.isna()] \
             .drop_duplicates(subset=['addr_norm'], keep='last')
     if out_of_data.shape[0] != 0:
-        update_new_buildings(
-                            r'..\new_buildings.xlsx',
-                            out_of_data[['adm_area', 'mun_district', 'address_w', 'year_exp_w', 'building_page',
-                                        'num_floors', 'metro_name_gkh', 'metro_minutes', 'metro_km']],
-                            startcol=1, startrow=2)
-        print('Не все данные распознались успешно')
-        logging.info('Не все данные распознались успешно')
-        print('Внесите данные о метро и этажности вручную в файл new_buildings.xlsx.')
-        print('Затем сохраните и закройте файл. Нажмите Enter.')
-        input()
-        # обновляем базу адресов с указанием года постройки и ссылки на дом (далее - база ЖКХ)
-        add_unrecognized()
-        norm_df = norm_df.drop(
-            columns=['address_w', 'adm_area', 'mun_district', 'year_exp_w', 'building_page', 'metro_minutes',
-                     'num_floors', 'metro_name_gkh', 'metro_km'])
-        norm_df = norm_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='address_w')
-        out_of_data = norm_df[norm_df.metro_name_gkh.isna() | norm_df.num_floors.isna()] \
-            .drop_duplicates(subset=['addr_norm'], keep='last')
-    if out_of_data.shape[0] == 0:
-        print('Все данные об этажности и метро распознаны')
-        logging.info('Все данные об этажности и метро распознаны')
-    else:
-        print('Остались неуточненные данные')
-        print(out_of_data.addr_norm)
-        logging.info('Остались неуточненные данные')
-        logging.info(f'{out_of_data.addr_norm}')
+        out_of_data.progress_apply(lambda x: metro_and_floor_data(x.gkh_address), axis=1)
+        gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
+        norm_df = norm_df.drop(columns=GKH_FIELDS)
+        norm_df = norm_df.merge(gkh_df, how='left', left_on='addr_norm_lower', right_on='gkh_address')
     return norm_df
 
-
+# -
 def fill_spaces_in_data(norm_df):
     """ Функция заполняет пропуски в данных, добавляет информацией о реновации,
         добавляет timestamp для сортировки.
@@ -1382,7 +1477,7 @@ def fill_spaces_in_data(norm_df):
     norm_df['реновация'] = norm_df[['период реновации', 'year_exp_w']].apply(lambda x: renov_fill(x), axis=1)
     return norm_df
 
-
+# -
 def fill_qty_rooms_with_predictions(norm_df):
     """ Функция заполняет пропуски в данных о количестве комнат с ипользованием ML-модели (DecisionTree),
         обучаемой на датасете прошедших торгов с известными параметрами
@@ -1408,7 +1503,7 @@ def fill_qty_rooms_with_predictions(norm_df):
     norm_df = norm_df.apply(lambda x: qty_rooms_predict(x), axis=1)
     return norm_df
 
-
+# -
 def compare_with_existing(ser):
     """ Функция сравнения Series, переданной из нового датафрейма, со строками в скачанном файле
         MosInvestData.xlsx.
@@ -1434,7 +1529,7 @@ def compare_with_existing(ser):
         return -2
     return row
 
-
+# -
 def metro_prep(name):
     """ Функция перевода имени метро в нижний регистр и уточнения отдельных станций"""
     try:
@@ -1449,7 +1544,7 @@ def metro_prep(name):
         pass
     return name
 
-
+# -
 def copy_cell(src_sheet, src_row, src_col,
               tgt_sheet, tgt_row, tgt_col,
               copy_style=True):
@@ -1459,7 +1554,7 @@ def copy_cell(src_sheet, src_row, src_col,
     if cell.has_style and copy_style:
         new_cell._style = copy(cell._style)
 
-
+# -
 def update_spreadsheet_w_drop(path: str, _df, startcol: int = 1, startrow: int = 1, sheet_name: str = "Sheet1",
                               add_rows_qty: int = 0):
     """
@@ -1567,27 +1662,31 @@ def update_spreadsheet_w_drop(path: str, _df, startcol: int = 1, startrow: int =
             wb[sheet_name].conditional_formatting.add(cells_range, rule)
     wb.save(file_name)
 
-
-def historical_processing(driver, in_process_df):
+# -
+def historical_processing():
 
     # считываем данные о прошедших торгах из файла
-    final_df = pd.read_excel(LOT_FILENAME, sheet_name='Прошедшие', engine='openpyxl',
-                             usecols=[2])
+#    final_df = pd.read_csv(LOT_FILENAME_HISTORICAL)
+    driver = start_browser_for_parse()
+    driver.implicitly_wait(30)
+    # url до 26.04.2023 'https://investmoscow.ru/tenders?pageNumber=1&pageSize=100&orderBy=CreateDate&orderAsc=false&objectTypes=7&tenderTypes=13&tenderStatuses=1&tradeForms=45001'
+    main_page_url = 'https://investmoscow.ru/tenders?pageNumber=1&pageSize=10&orderBy=RequestEndDate&orderAsc=true&objectTypes=nsi:41:30011568&objectKinds=nsi:tender_type_portal:13&tenderStatus=nsi:tender_status_tender_filter:2&timeToPublicTransportStop.noMatter=true'
+    driver.get(main_page_url)
+    wait = WebDriverWait(driver, 30)
+    print('Номер страницы')
+    num = int(input())
+    cur_page_url = 'https://investmoscow.ru/tenders?pageNumber=' + str(num) + '&pageSize=100&' + \
+                   'orderBy=RequestEndDate&orderAsc=true&objectTypes=nsi:41:30011568&' + \
+                   'objectKinds=nsi:tender_type_portal:13&tenderStatus=nsi:tender_status_tender_filter:2' + \
+                   '&timeToPublicTransportStop.noMatter=true'
 
-    df_for_save = pd.DataFrame(columns = ['lot_tag', 'addr_norm', 'adm_area', 'mun_district', 'metro_name_gkh', 'metro_km',
-                           'metro_minutes', 'addr_floor', 'total_floors', 'year_exp_w', 'реновация', 'ремонт',
-                           'qty_rooms', 'is_qty_rooms_predicted', 'obj_square',
-                           'start_price', 'start_price_m2', 'final_price', 'final_price_m2', 'delta_price', 'status',
-                           'auct_date', 'investMSK_URL', 'lot_URL', 'platform_name',
-                           'timestamp', 'building_page'])
+    driver, url_page_lst = get_url_list_from_page(driver, cur_page_url, is_active=False)
 
-    today = dt.datetime.today()
-    in_process_df.auct_date = pd.to_datetime(in_process_df.auct_date)
-    url_lst = in_process_df['investMSK_URL'].to_list()
+
     unreadable_urls = []
-    print('Обработка данных со статусом InProcess ')
-    logging.info('Обработка данных со статусом InProcess ')
-    for url in tqdm(url_lst, position=0):
+    print('Обработка страницы ', num, 'прошедших торгов')
+    logging.info(f'Обработка страницы {num} прошедших торгов ')
+    for url in tqdm(url_page_lst, position=0):
         # считываем страницу с заданным URL, при нескачивании в течении 10 секунд добавляем ссылку в список нескачанных
         try:
 
@@ -1659,7 +1758,7 @@ def historical_processing(driver, in_process_df):
 
 
 def actual_moskowinvest():
-    # global gkh_df
+    global gkh_df
     # global date_to
     # global clf
     # global MID_df
@@ -1700,7 +1799,7 @@ def actual_moskowinvest():
                        'orderBy=RequestEndDate&orderAsc=true&objectTypes=nsi:41:30011568&' + \
                        'objectKinds=nsi:tender_type_portal:13&tenderStatus=nsi:tender_status_tender_filter:1' + \
                         '&timeToPublicTransportStop.noMatter=true'
-        driver, url_page_lst = get_url_list_from_page(driver, cur_page_url)
+        driver, url_page_lst = get_url_list_from_page(driver, cur_page_url, is_active=True)
         url_lst = url_lst + url_page_lst
         #url_lst .append(url_page_lst)
     # создаем датафрейм с данными лотов
@@ -1713,11 +1812,7 @@ def actual_moskowinvest():
     for url in tqdm(url_lst):
         # считываем страницу с заданным URL, при нескачивании в течении 10 секунд добавляем ссылку в список нескачанных
         try:
-            # page = requests.get(url, timeout=10)
-            # soup = BeautifulSoup(page.text, "html.parser")
             driver, lot_single = parse_lot(driver, url)
-            #lot_single = parse_lot(soup, is_actual=True)
-            lot_single['investMSK_URL'] = url
             if not (pd.isna(lot_single['start_price'])):
                 lot_df = pd.concat([lot_df, lot_single.to_frame().T], ignore_index = True)
             else:
@@ -1726,8 +1821,6 @@ def actual_moskowinvest():
                 logging.info(f'Нечитаемая ссылка N{error_url_cnt} {url}')
                 logging.info(f"lot_tag  {lot_single['lot_tag']}")
                 unreadable_urls.append(url)
-                # print('Ошибка: ', traceback.format_exc())
-                # logging.info(f'Ошибка: {traceback.format_exc()}')
                 error_url_cnt += 1
                 continue
         except Exception as e:
@@ -1736,8 +1829,6 @@ def actual_moskowinvest():
             logging.info(f'Нечитаемая ссылка N{error_url_cnt} {url}')
             logging.info(f"lot_tag  {lot_single['lot_tag']}")
             unreadable_urls.append(url)
-            # print('Ошибка: ', traceback.format_exc())
-            # logging.info(f'Ошибка: {traceback.format_exc()}')
             error_url_cnt += 1
             continue
     print('Всего новых объектов: ', qty_lots)
@@ -1749,10 +1840,12 @@ def actual_moskowinvest():
     # повторно пытаемся скачать ранее нескачанные ссылки с таймаутом 60 секунд
     if len(unreadable_urls) > 0:
         lot_df = reparsing_unreadable_urls(driver, lot_df, qty_lots, unreadable_urls)
-
     # исключаем строки, в прием заявок по которым окончен ранее или сегодня
     today = pd.to_datetime('today')
-    lot_df = lot_df[lot_df['deadline'] > today]
+    lot_df = lot_df[lot_df['finish_application_date'] > today]
+    lot_df.to_csv('time_lot_df.csv',index=False)
+    # lot_df = pd.read_csv('time_lot_df.csv') #, nrows = 90
+
 
     # очистка датафрейма от дублирующихся лотов
     if len(lot_df) > 0:
@@ -1767,178 +1860,10 @@ def actual_moskowinvest():
         norm_df = is_metro_and_floor_data_complete(norm_df)
     else:
         norm_df = pd.DataFrame()
-    # в случае, если в карточке отсутствует указание на этажность дома - заполняем по данным ЖКХ
-    if len(norm_df) > 0:
-        len_norm_df = 1
-        norm_df = fill_spaces_in_data(norm_df)
 
-        df_for_save = norm_df[['lot_tag', 'addr_norm', 'adm_area', 'mun_district', 'metro_name_gkh', 'metro_km',
-                           'metro_minutes', 'addr_floor', 'total_floors', 'year_exp_w', 'реновация', 'ремонт',
-                           'qty_rooms', 'obj_square',
-                           'start_price', 'start_price_m2', 'deadline',
-                           'auct_date', 'investMSK_URL', 'lot_URL', 'platform_name',
-                           'timestamp', 'building_page']]
-        df_for_save = df_for_save.rename(columns={'metro_name_gkh': 'metro_name'})
+    norm_df.to_csv(LOT_FILENAME)
 
-        # обновляем датафрейм MID.xls
-        MID_df = pd.read_excel(LOT_FILENAME, sheet_name='Активные', engine='openpyxl',
-                               converters={"lot_tag": str}
-                               )
 
-        MID_df = MID_df.dropna(subset=['lot_tag'])
-    #    MID_df = MID_df[:-1]
-        df_for_save['Примечания'] = np.nan
-
-        df_for_save['flag'] = np.nan
-        MID_df['flag'] = np.nan
-        # в df_for_save flag = -1 для строк, отсутсвующих в MID, -2 для строк, в которых изменен дедлайн или дата торгов
-        df_for_save['flag'] = df_for_save.apply(lambda x: compare_with_existing(x), axis=1)
-        # в датафрейм MID добавляем новые строки (flag = -1)
-        add_cells_qty = df_for_save[df_for_save.flag == -1].shape[0] # количество новых строк для эксельки
-        add_cells_qty += df_for_save[df_for_save.flag == -2].shape[0]
-        MID_df = pd.concat([MID_df, df_for_save[df_for_save.flag == -1]], ignore_index=True)
-        MID_df = pd.concat([MID_df, df_for_save[df_for_save.flag == -2]], ignore_index=True)
-        # дополняем колонкой, обозначающей дубликаты // инверсный флаг - те строки, которые надо оставить помечаются True
-        MID_df['flag_duplication'] = ~MID_df.duplicated(subset=['lot_tag'], keep='last')
-        # устанавливаем флаг актуальности (если дата подачи сегодня или  ранее - запись не актуальна)
-        MID_df.flag = MID_df.deadline > today
-        # выбираем лоты с неактуальными датами для добавления в InProcess
-        in_process_add_df = MID_df[~MID_df.flag].copy()
-        # объединяем флаги для последующего удаления строк в Эксельке - любой False удалится
-        MID_df.flag = MID_df.flag & MID_df.flag_duplication
-        MID_df['lot_tag'] = MID_df['lot_tag'].apply(lambda x: str(x).strip())
-
-        # ---------> заполняем пропуски в количестве комнат
-        MID_df = fill_qty_rooms_with_predictions(MID_df)
-        MID_df['metro_minutes'] = pd.to_numeric(MID_df['metro_minutes'], errors='coerce')
-        # подготовка данных MID для объеднинения с базой ЦИАН
-        cut_labels_4 = ['<10 мин', '<20 мин', '<30 мин', '>30 мин']
-        cut_bins = [0, 10, 20, 30, 3000]
-        MID_df['metro_min'] = pd.cut(MID_df['metro_minutes'],
-                                     bins=cut_bins,
-                                     labels=cut_labels_4)
-        MID_df['is_renov'] = MID_df['реновация'].apply(lambda x: 'Нет' if (x == 'новый дом') and (x == 'нет в плане')
-                                                                          and (x == 'N/A') else 'Да')
-        rooms_labels_4 = ['1', '2', '3', '4+']
-        rooms_bins = [0, 1, 2, 3, 20]
-        MID_df['rooms_qty'] = pd.cut(MID_df['qty_rooms'],
-                                     bins=rooms_bins,
-                                     labels=rooms_labels_4)
-        MID_df['metro_name_lower'] = MID_df.metro_name.apply(metro_prep)
-
-        # формирование окончательного датафрейма
-        MID_df = MID_df[['lot_tag', 'addr_norm', 'adm_area', 'mun_district', 'metro_name', 'metro_km', 'metro_minutes',
-                         'addr_floor', 'total_floors', 'year_exp_w', 'реновация', 'ремонт', 'qty_rooms',
-                         'is_qty_rooms_predicted',
-                         'obj_square', 'start_price', 'start_price_m2', 'limit', 'deadline', 'auct_date',
-                         'investMSK_URL', 'lot_URL',
-                         'platform_name', 'timestamp', 'building_page', 'Примечания', 'flag']]
-
-        print('Запись данных по активным лотам в файл MosInvestData_v2.xlsx')
-        logging.info('Запись данных по активным лотам в файл MosInvestData_v2.xlsx')
-        try:
-            update_spreadsheet_w_drop(LOT_FILENAME,
-                                  MID_df, startcol=2, startrow=2, add_rows_qty=add_cells_qty, sheet_name='Активные')
-        except:
-            print('Закройте файл MosInvestData_v2.xlsx и нажмите Enter')
-            logging.info('Закройте файл MosInvestData_v2.xlsx и нажмите Enter')
-            input()
-            update_spreadsheet_w_drop(LOT_FILENAME,
-                                      MID_df, startcol=2, startrow=2, add_rows_qty=add_cells_qty, sheet_name='Активные')
-
-        print('Обработка новых лотов')
-        logging.info('Обработка новых лотов')
-        # ------------> обработка листа с новыми объектами
-        new_MID_df = pd.read_excel(LOT_FILENAME, sheet_name='NEW!!!', engine='openpyxl',
-                                   converters={"lot_tag": str, "metro_minutes" : str}
-                                   )
-        new_MID_df = new_MID_df.dropna(subset=['lot_tag'])
-    #    new_MID_df = new_MID_df[:-1]
-        # существующим записям присваиваем флаг False для удаления
-        new_MID_df['flag'] = False
-        # добавляем новые и измененные данные
-        new_MID_df = pd.concat([new_MID_df, df_for_save[df_for_save.flag == -1]], ignore_index=True)
-        new_MID_df = pd.concat([new_MID_df, df_for_save[df_for_save.flag == -2]], ignore_index=True)
-        if len(new_MID_df) > 0:
-            add_cells_qty = df_for_save[df_for_save.flag == -1].shape[0] + df_for_save[df_for_save.flag == -2].shape[0]
-            new_MID_df.flag = new_MID_df.flag < 0
-            new_MID_df['metro_minutes'] = pd.to_numeric(new_MID_df['metro_minutes'], errors='coerce')
-
-            # подготовка данных MID для объеднинения с базой ЦИАН
-            cut_labels_4 = ['<10 мин', '<20 мин', '<30 мин', '>30 мин']
-            cut_bins = [0, 10, 20, 30, 3000]
-            new_MID_df['metro_min'] = pd.cut(new_MID_df['metro_minutes'],
-                                         bins=cut_bins,
-                                         labels=cut_labels_4)
-            new_MID_df['is_renov'] = new_MID_df['реновация'].apply(lambda x: 'Нет' if (x == 'новый дом') and (x == 'нет в плане')
-                                                                              and (x == 'N/A') else 'Да')
-            new_MID_df = fill_qty_rooms_with_predictions(new_MID_df)
-            rooms_labels_4 = ['1', '2', '3', '4+']
-            rooms_bins = [0, 1, 2, 3, 20]
-            new_MID_df['rooms_qty'] = pd.cut(new_MID_df['qty_rooms'],
-                                         bins=rooms_bins,
-                                         labels=rooms_labels_4)
-            new_MID_df['metro_name_lower'] = new_MID_df.metro_name.apply(metro_prep)
-            new_MID_df = new_MID_df[['lot_tag', 'addr_norm', 'adm_area', 'mun_district', 'metro_name', 'metro_km',
-                                     'metro_minutes', 'addr_floor', 'total_floors', 'year_exp_w', 'реновация', 'ремонт',
-                                     'qty_rooms', 'is_qty_rooms_predicted',
-                                     'obj_square', 'start_price', 'start_price_m2', 'limit', 'deadline', 'auct_date',
-                                     'investMSK_URL', 'lot_URL',
-                                     'platform_name', 'timestamp', 'building_page', 'Примечания', 'flag']]
-            print('Запись данных по новым лотам в файл MosInvestData_v2.xlsx')
-            logging.info('Запись данных по новым лотам в файл MosInvestData_v2.xlsx')
-            try:
-                update_spreadsheet_w_drop(LOT_FILENAME, new_MID_df, sheet_name='NEW!!!',
-                                          startcol=2, startrow=2, add_rows_qty=add_cells_qty)
-            except (Exception, ):
-                print('Закройте файл MosInvestData_v2.xlsx и нажмите Enter')
-                logging.info('Закройте файл MosInvestData_v2.xlsx и нажмите Enter')
-                input()
-                update_spreadsheet_w_drop(LOT_FILENAME, new_MID_df, sheet_name='NEW!!!',
-                                          startcol=2, startrow=2, add_rows_qty=add_cells_qty)
-        print('Обработка лотов, по которым закончен прием предложений')
-        logging.info('Обработка лотов, по которым закончен прием предложений')
-    else:
-        print('Новые объекты отсутсвуют')
-        logging.info('Новые объекты отсутсвуют')
-        len_norm_df = 0
-    # ------------> обработка листа с объектами InProcess
-    in_process_df = pd.read_excel(LOT_FILENAME, sheet_name='InProcess', engine='openpyxl',
-                                  converters={"lot_tag": str, "metro_minutes": str})
-    in_process_df = in_process_df.dropna(subset=['lot_tag'])
-    start_len = len(in_process_df)
-    # добавляем новые и измененные данные
-    if len_norm_df == 1:
-        in_process_df = pd.concat([in_process_df, in_process_add_df], ignore_index=True)
-    in_process_df['flag'] = np.nan
-    if len(in_process_df) > 0:
-        in_process_df = historical_processing(driver, in_process_df)
-        print('Сохраняются данные лотов, по которым закончен прием предложений')
-        logging.info('Сохраняются данные лотов, по которым закончен прием предложений')
-        add_cells_qty = len(in_process_df) - start_len
-        in_process_df = in_process_df[
-            ['lot_tag', 'addr_norm', 'adm_area', 'mun_district', 'metro_name', 'metro_km', 'metro_minutes',
-             'addr_floor', 'total_floors', 'year_exp_w', 'реновация', 'ремонт', 'qty_rooms',
-             'is_qty_rooms_predicted',
-             'obj_square', 'start_price', 'start_price_m2', 'limit', 'deadline', 'auct_date',
-             'investMSK_URL', 'lot_URL',
-             'platform_name', 'timestamp', 'building_page', 'Примечания', 'flag']]
-        try:
-            update_spreadsheet_w_drop(LOT_FILENAME, in_process_df, sheet_name='InProcess',
-                                      startcol=2, startrow=2, add_rows_qty=add_cells_qty)
-        except (Exception, ):
-            print('Закройте файл MosInvestData_v2.xlsx и нажмите Enter')
-            logging.info('Закройте файл MosInvestData_v2.xlsx и нажмите Enter')
-            input()
-            update_spreadsheet_w_drop(LOT_FILENAME, in_process_df, sheet_name='InProcess',
-                                      startcol=2, startrow=2, add_rows_qty=add_cells_qty)
-    driver.quit()
-    try:
-        driver.quit()
-    except (Exception,):
-        pass
-    print('Обновление данных завершено.')
-    logging.info('Обновление данных завершено.')
 
 
 # Press the green button in the gutter to run the script.
@@ -1949,18 +1874,32 @@ if __name__ == '__main__':
     # for url_ in test_url_list:
     #     driver, lot_status, final_price = is_lot_finished(driver, url_)
     #     print(lot_status, final_price)
+
+
     LOT_FIELDS = ['lot_tag', 'auct_type', 'object_type', 'cadastr_num', 'addr_string',
+                  'addr_street', 'addr_build_num', 'addr_floor_from_title', 'addr_apart_num_from_title',
                   'flat_num', 'qty_rooms', 'addr_floor', 'total_floors', 'obj_square', 'start_price',
                   'start_price_m2','deposit', 'auct_step', 'auct_form', 'start_applications_date',
                   'finish_application_date', 'participant_selection_date',
-                  'bidding_date', 'results_date', 'roseltorg_url', 'torgi_URL',
+                  'bidding_date', 'results_date', 'roseltorg_url', 'torgi_url',
                   'metro_station', 'inf_sales', 'inf_food_service', 'inf_education',
-                  'inf_cult_and_sport', 'inf_consumer_services', 'documentation_expl',
-                  'documentation_photo', 'investmoscow_url']
-    LOT_FILENAME = r'..\realty_model_lot_data.xlsx'
+                  'inf_cult_and_sport', 'inf_consumer_services', 'inf_health_care',
+                  'documentation_expl', 'documentation_photo', 'investmoscow_url']
+    LOT_FILENAME = r'..\realty_model_actual_lot_data.csv'
+    LOT_FILENAME_HISTORICAL = r'..\realty_model_historical_lot_data.csv'
+    GKH_BASE_FILENAME = r'gkh_base.csv'
+    GKH_FIELDS = ['adm_area', 'mun_district', 'gkh_address', 'gkh_total_floors', 'geo_lat',
+                  'geo_lon', 'overlap_material', 'skeleton', 'wall_material',
+                  'category', 'residents_qty', 'construction_year', 'ceiling_height',
+                  'passenger_elevators_qty', 'condition', 'gkh_metro_station',
+                  'metro_km', 'metro_min', 'gkh_cadastr_num', 'code_KLADR', 'global_repair_date',
+                  'is_renov', 'renov_period',
+                  'building_page_url']
+
     SCROLL_PAUSE_TIME = 0.5
     current_date = datetime.datetime.now()
     current_date_string = current_date.strftime('%y_%m_%d_%H_%M')
+    historical_processing()
     print(current_date_string)
     logging.basicConfig(
         level=logging.INFO,
@@ -1970,8 +1909,6 @@ if __name__ == '__main__':
     )
 
     logging.info('Hello')
-    clf = tree.DecisionTreeClassifier(criterion='entropy', max_depth=10)
-    MID_df = pd.DataFrame()
     gkh_df = pd.DataFrame()
     date_to = ''
     morph_vocab = MorphVocab()
