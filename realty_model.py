@@ -20,13 +20,18 @@ from natasha import AddrExtractor, MorphVocab
 import traceback
 import pymorphy2
 import pymorphy2_dicts_ru
+
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.common.by import By
 from selenium.webdriver import ActionChains
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.chrome.service import Service
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+
+from pyshadow.main import Shadow
+
 import logging
 import os
 # для работы progress_apply
@@ -101,7 +106,7 @@ def go_to_procedure_detail(driver, tab_name):
     :param tab_name: надпись на вкладке
     :return driver после открытия нужной вкладки"""
     element = driver.find_element(By.XPATH, "//div[text()='"+tab_name+"']")
-    body = driver.find_element_by_css_selector('body')
+    body = driver.find_element(By.CSS_SELECTOR,'body')
 
     try:
         WebDriverWait(driver, 10).until(
@@ -1225,7 +1230,11 @@ def update_spreadsheet_hist(path: str, _df, startcol: int = 1, startrow: int = 1
 
 def start_browser_for_parse(pict=False):
     """ Функция запуска Chrome-браузера"""
-    chrome_options = webdriver.ChromeOptions()
+
+    chrome_options = Options()
+    chrome_options.page_load_strategy = 'eager'
+
+    #chrome_options = webdriver.ChromeOptions()
     # chrome_options.add_argument("--headless")
     # chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument('--start-maximized')
@@ -1235,7 +1244,9 @@ def start_browser_for_parse(pict=False):
         prefs = {"profile.managed_default_content_settings.images": 2}
         chrome_options.add_experimental_option("prefs", prefs)
     path_to_wd = os.getcwd()
-    driver = webdriver.Chrome(executable_path=(path_to_wd + '\\chromedriver.exe'), options=chrome_options)
+    # driver = webdriver.Chrome(executable_path=(path_to_wd + '\\chromedriver.exe'), options=chrome_options)
+    service = webdriver.ChromeService(executable_path=(path_to_wd + '\\chromedriver.exe'))
+    driver = webdriver.Chrome(service=service, options=chrome_options)
     return driver
 
 
@@ -1250,7 +1261,7 @@ def get_url_list_from_page(driver, cur_page_url, is_active):
     driver.get(cur_page_url)
     wait = WebDriverWait(driver, 20)
     a_class = (By.CLASS_NAME, "uid-mb-40")
-    qty_a_class = len(driver.find_elements_by_class_name("uid-mb-40"))
+    qty_a_class = len(driver.find_elements(By.CLASS_NAME, "uid-mb-40"))
     if qty_a_class > 0:
         wait.until(
             EC.presence_of_element_located(a_class))
@@ -1282,7 +1293,7 @@ def get_url_list_from_page(driver, cur_page_url, is_active):
     wait.until(
         EC.presence_of_element_located((By.XPATH,
                                         '//div[@class="list"]')))
-    body = driver.find_element_by_css_selector('body')
+    body = driver.find_element(By.CSS_SELECTOR, 'body')
 
     # ----> медленная прокрутка окна
     driver.execute_script("window.scrollTo(document.body.scrollHeight, 0);")
@@ -1549,7 +1560,7 @@ def recognize_and_normalize_addresses(norm_df):
                         new_addr_dict = {'gkh_address': row['addr_norm_lower']}
                         gkh_df = pd.concat([gkh_df, pd.DataFrame.from_records([new_addr_dict])] ,ignore_index=True)
                 except Exception as e:
-                    logging.info(f'Ошибка: {traceback.format_exc()}')
+                    logging.info(f'Ошибка: {traceback.format_exc().split("Stacktrace:")[0]}')
             gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
 
 
@@ -2009,8 +2020,8 @@ def historical_processing():
             print(f'Нечитаемая ссылка {url}')
             logging.info(f'Нечитаемая ссылка {url}')
             unreadable_urls.append(url)
-            print('Ошибка:\n', traceback.format_exc())
-            logging.info(f'Ошибка:\n {traceback.format_exc()}')
+            print('Ошибка:\n', traceback.format_exc().split('Stacktrace:')[0])
+            logging.info(f'Ошибка:\n {traceback.format_exc().split("Stacktrace:")[0]}')
             continue
 
     print('Пропущенных объектов: ', len(unreadable_urls))
@@ -2227,18 +2238,55 @@ def test_bidding_def():
 
 
 def test_def():
-    driver = start_browser_for_parse()
-    driver.implicitly_wait(30)
+
+    driver = start_browser_for_parse(pict=True)
+    driver.implicitly_wait(10)
     winner_url = 'https://w7.baza-winner.ru/search/24504c3f-915f-427b-92af-828ab5f6f049/list'
     print('')
-    driver.get(winner_url)
-    shadow_host = driver.find_element(By.CSS_SELECTOR, '#shadow-root')
-    shadow_root = shadow_host.shadow_root
-    shadow_content = shadow_root.find_element(By.CSS_SELECTOR, '#shadow_content')
+    driver.get('https://w7.baza-winner.ru/main')#winner_url)
+    print(driver.current_url)
+    shadow_host = driver.find_element(By.TAG_NAME, 'bw-app')
+    shadow_root1 = shadow_host.shadow_root
+    root2 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(shadow_root1.find_element(By.ID, 'pages')))
+    root3 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(root2.find_element(By.CLASS_NAME, 'iron-selected')))
+    shadow_root3 = root3.shadow_root
+    root4 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(shadow_root3.find_element(By.ID, 'bwSearchPageTab')))
+    shadow_root4 = root4.shadow_root
+    root5 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(shadow_root4.find_element(By.ID, 'bwSearchPageTabMainContent')))
+    shadow_root5 = root5.shadow_root
+    root6 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(shadow_root5.find_element(By.ID, 'pages')))
+    root7 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(root6.find_element(By.CSS_SELECTOR, 'bw-panel')))
+    root8 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(root7.find_element(By.CSS_SELECTOR, 'bw-wide-search-form-grid-page')))
+    shadow_root8 = root8.shadow_root
+    # root9 = WebDriverWait(driver, 5).until(
+    #     EC.visibility_of(shadow_root8.find_element(By.ID, 'searchResultsGridWrapper')))
+    # shadow_root9 = root9.shadow_root
+#    t = root8.text
 
-    el = driver.find_element(By.XPATH, "//div[@id='content']")
-    group_el = driver.find_element(By.XPATH, "//div[@ref='eViewport']")
-    string_els = group_el.find_elements(By.XPATH, "//div[@role='row']")
+    root9 = shadow_root8.find_element(By.CLASS_NAME, "ag-center-cols-container")
+#    group_el = driver.find_element(By.CSS_SELECTOR, "div[ref='eViewport']")
+    string_els = root9.find_elements(By.CSS_SELECTOR, "div[role='row']")
+
+    for el in string_els[:3]:
+        row = {WINNER_BASE_FIELDS[i]: np.nan for i in range(len(WINNER_BASE_FIELDS))}
+        row['qty_rooms'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='6']").text
+        row['addr_string'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='9']").text
+        floor_params = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='10']").text
+        row['addr_floor'] = floor_params.split('/')[0]
+        row['total_floors'] = floor_params.split('/')[1].split(' ')[0]
+        row['obj_square'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='14']").text.split('/')[0]
+        row['price'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='16']").text
+        row['date'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='19']").text
+        row['seller_name'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='22']").text
+        print(row)
+
     print()
 
 
@@ -2251,7 +2299,8 @@ if __name__ == '__main__':
     #     driver, lot_status, final_price = is_lot_finished(driver, url_)
     #     print(lot_status, final_price)
 
-
+    WINNER_BASE_FIELDS = ['addr_string', 'addr_street', 'addr_build_num',                                               'qty_rooms', 'addr_floor', 'total_floors', 'obj_square', 'price',
+                        'price_m2', 'date', 'is_active', 'seller_name']
     LOT_FIELDS = ['lot_tag', 'auct_type', 'object_type', 'cadastr_num', 'addr_string',
                   'addr_street', 'addr_build_num', 'addr_floor_from_title', 'addr_apart_num_from_title',
                   'flat_num', 'qty_rooms', 'addr_floor', 'total_floors', 'obj_square', 'start_price',
@@ -2266,7 +2315,7 @@ if __name__ == '__main__':
     LOT_FILENAME_HISTORICAL = r'..\realty_model_files\realty_model_historical_lot_data.csv'
     BIDDING_FILENAME = r'..\realty_model_files\bidding.csv'
     GKH_BASE_FILENAME = r'..\realty_model_files\gkh_base.csv'
-    GKH_FIELDS = ['adm_area', 'mun_district', 'gkh_address', 'gkh_total_floors', 'is_total_floors_variable',
+    GKH_FIELDS = ['adm_area', 'mun_district', 'gkh_address', 'gkh_total_floors',        'is_total_floors_variable',
                   'geo_lat', 'geo_lon', 'overlap_material', 'skeleton', 'wall_material',
                   'category', 'residents_qty', 'construction_year', 'ceiling_height',
                   'passenger_elevators_qty', 'condition', 'gkh_metro_station',
@@ -2338,6 +2387,6 @@ if __name__ == '__main__':
         elif mode_choice == '5':
             test_bidding_def()
     except Exception as e:
-        print('Ошибка: ', traceback.format_exc())
-        logging.info(f'Ошибка: {traceback.format_exc()}')
+        print('Ошибка: ', traceback.format_exc().split('Stacktrace:')[0])
+        logging.info(f'Ошибка: {traceback.format_exc().split("Stacktrace:")[0]}')
 
