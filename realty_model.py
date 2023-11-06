@@ -30,8 +30,6 @@ from selenium.webdriver.common.keys import Keys
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 
-from pyshadow.main import Shadow
-
 import logging
 import os
 # для работы progress_apply
@@ -1934,7 +1932,7 @@ def add_bidding_data(norm_df, bidding_df):
     print('Roseltorg: Отсутствуют данные по ', norm_df.id.isna().sum(), 'лотам')
     return norm_df
 
-# -
+
 def historical_processing():
     global gkh_df
     global current_date_string
