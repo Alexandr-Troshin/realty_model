@@ -906,8 +906,38 @@ def update_new_buildings(path: str, _df, startcol: int = 1, startrow: int = 1, s
             wb[sheet_name].cell(startrow + ir, startcol + ic).value = _df.iloc[ir][ic]
     wb.save(path)
 
-# -
-def metro_and_floor_data(addr_norm, url_ready):
+
+def convert_addr_to_winner_type(addr_str):
+    print(addr_str)
+#    addr_str = re.sub("г. москва, ", "", addr_str)
+    addr_els = addr_str.split(', ')
+    addr_street_els = addr_els[1].strip().split(' ')
+
+    if addr_street_els[0] == 'ул.':
+        addr_street = ' '.join(addr_street_els[1:]) + ' ул.'
+    elif addr_street_els[0] == 'ш.':
+        addr_street = ' '.join(addr_street_els[1:]) + ' ш.'
+    elif addr_street_els[0] == 'проезд.':
+        addr_street = ' '.join(addr_street_els[1:]) + ' пр-д'
+    elif addr_street_els[0] == 'наб.':
+        addr_street = ' '.join(addr_street_els[1:]) + ' наб.'
+    elif addr_street_els[0] == 'пр-кт.':
+        addr_street = ' '.join(addr_street_els[1:]) + ' просп.'
+
+    addr_build = ''
+    for i in range(len(addr_els)-2):
+        if addr_els[i+2].startswith('д.'):
+            addr_build += addr_els[i+2].split(' ')[1]
+        elif addr_els[i+2].startswith('к.'):
+            addr_build += 'к' + addr_els[i+2].split(' ')[1]
+        elif addr_els[i + 2].startswith('стр.'):
+            addr_build += 'с' + addr_els[i + 2].split(' ')[1]
+
+    addr_as_winner = addr_street + ', ' + addr_build
+    return addr_as_winner
+
+
+def metro_and_floor_data(driver, addr_norm, url_ready, is_for_winner=False):
     """ Функция поиска данных об адресе на ресурсе flatInfo.ru (этажность и расстояние до метро)
     Функция дополнительно обновляет базу ЖКХ update_gkh_base    """
     global gkh_df
@@ -919,7 +949,7 @@ def metro_and_floor_data(addr_norm, url_ready):
     res = {GKH_FIELDS[i]: np.nan for i in range(len(GKH_FIELDS))}
     if pd.isna(url_ready):
         try:
-            driver = start_browser_for_parse()
+
             driver.get('https://flatinfo.ru')
             element = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/input[1]")
             adr1 = re.sub('проезд.', 'проезд', addr_norm)
@@ -966,187 +996,198 @@ def metro_and_floor_data(addr_norm, url_ready):
                 parse_addr_line = re.sub(' г. Зеленоград, д.', ' г. Зеленоград, к.', parse_addr_line)
                 print(addr_norm)
                 print(parse_addr_line)
-                if (parse_addr_line.lower()) != addr_norm:
-                    print('адреса не совпадают')
-                    print(addr_norm)
-                    print(parse_addr_line)
-                    logging.info('адреса не совпадают')
-                    print('Ввести правильный url?')
-                    is_cont = input()
-                    while is_cont not in ['Y', 'y', 'N', 'n']:
-                        print('Некорректный ввод - y/n')
-                        is_cont = input()
-                    if is_cont in ['Y', 'y']:
-                        print('Введите правильный url')
-                        new_url = input()
-                        driver.get(new_url)
-                        # if re.search('h_info', new_url) is not None:
-                        #     addr_line = re.sub(' в Москве', '',
-                        #                        driver.find_element(By.XPATH, "//h1[starts-with(text(), 'О доме')]").text)
-                        #     parse_addr_line = secondary_addr_normalize_for_metrodistance(addr_line)
-                        #     if (parse_addr_line.lower()) != addr_norm:
-                        #         print('адреса нового url не совпадают')
-                        #         logging.info('адреса нового url не совпадают')
-                        #         driver.quit()
-                        #         return res
-                        cur_url = new_url
-                    else:
-                        driver.quit()
-                        return res
-                print('адреса норм')
-                logging.info('адреса норм')
-                res['gkh_address'] = addr_norm
-                driver.quit()
+                is_equal_addr = False
+                if not is_for_winner and (parse_addr_line.lower()) == addr_norm:
+                    is_equal_addr = True
+                elif is_for_winner and (convert_addr_to_winner_type(parse_addr_line.lower()) == addr_norm.lower()):
+                    is_equal_addr = True
+
+                print(convert_addr_to_winner_type(parse_addr_line.lower()))
+                print(addr_norm.lower())
+                print(is_equal_addr)
         except Exception as exc:
             print(exc)
-    else:
-        cur_url = url_ready
-        res['gkh_address'] = addr_norm
-        # driver = start_browser_for_parse()
-    try:
-        try:
-            r = requests.get(cur_url)
-            res['building_page_url'] = cur_url
-            soup = BeautifulSoup(r.text, 'lxml')
-            # скачиваем страницу инфы о доме
-            full_info = soup.find('div', class_='page__content')
-            li_blocks = full_info.find_all('li', class_='fi-list__item fi-list-item')
-            # и ищем характеристики этажности
-            for li_bl in li_blocks:
-                try:
-                    label_text = li_bl.find('span', class_='fi-list-item__label').text.strip()
-                    param_value = li_bl.find('span', class_='fi-list-item__value').text.strip()
-                except:
-                    continue
-
-                if label_text == 'Этажей всего':
-                    t2 = param_value.strip('\r').strip('\n').strip('\t').split('\n')
-                    t3 = t2[0].strip()
-                    res['gkh_total_floors'] = t3
-
-                elif label_text == 'Год постройки':
-                    try:
-                        res['construction_year'] = int(param_value.strip('\n').strip())
-                    except Exception as exc:
-                        print(addr_norm, 'ошибка определения года постройки ', param_value)
-                        logging.info(f'{addr_norm} ошибка определения года постройки {param_value}')
-                elif label_text == 'Округ':
-                    res['adm_area'] = param_value.strip('\n').strip()
-                elif label_text == 'Район':
-                    res['mun_district'] = param_value.strip('\n').strip()
-                elif label_text == 'Гео-координаты':
-                    try:
-                        res['geo_lat'] = round(float(param_value.strip('\n')
-                                                     .split('/')[0].strip()), 5)
-                        res['geo_lon'] = round(float(param_value.strip('\n')
-                                                     .split('/')[1].strip()), 5)
-                    except Exception as exc:
-                        print(addr_norm, 'ошибка определения координат ', param_value)
-                        logging.info(f'{addr_norm} ошибка определения координат {param_value}')
-                elif label_text == 'Перекрытия':
-                    res['overlap_material'] = param_value.strip('\n').strip()
-                elif label_text == 'Каркас':
-                    res['skeleton'] = param_value.strip('\n').strip()
-                elif label_text == 'Стены':
-                    res['wall_material'] = param_value.strip('\n').strip()
-                elif label_text == 'Категория':
-                    res['category'] = param_value.strip('\n').strip()
-                elif label_text == 'Лифтов в подъезде' or \
-                        label_text == 'Пассажирских лифтов в подъезде':
-                    res['passenger_elevators_qty'] = param_value.strip('\n').strip()
-                elif label_text == 'Состояние':
-                    res['condition'] = param_value.strip('\n').strip()
-                elif label_text == 'Кадастровый номер дома':
-                    res['gkh_cadastr_num'] = param_value.strip('\n').strip()
-                elif label_text == 'Высота потолков':
-                    try:
-                        res['ceiling_height'] = int(param_value.strip('\n').strip().split(' ')[0])
-                    except Exception as exc:
-                        print('Ошибка определения высоты потолков - ', param_value)
-                elif label_text == 'Код адреса КЛАДР':
-                    res['code_KLADR'] = param_value.strip('\n').strip()
-                elif label_text == 'Расселение по реновации':
-                    if not re.search('не включен', param_value.lower()):
-                        res['is_renov'] = 1
-                        value_lst = param_value.strip('\n').strip().split(' ')
-                        res['renov_period'] = value_lst[-4] + '-' + value_lst[-2]
-                elif label_text == 'Проживает':
-                    try:
-                        res['residents_qty'] = int(param_value.strip('\n').strip().split(' ')[0])
-                    except Exception as exc:
-                        print(addr_norm, 'ошибка определения количества проживающих ', param_value)
-                        logging.info(f'{addr_norm} ошибка определения количества проживающих {param_value}')
-                else:
-                    if re.search('ремонт', label_text):
-                        print(addr_norm, 'упоминание капремонта  ', label_text, param_value)
-                        logging.info(f'{addr_norm} упоминание капремонта {label_text} {param_value}')
-
-            try:
-                transport_data = full_info.find('ul', class_='fi-list underground')
-                transp_bl = transport_data.find_all('li', class_='fi-list__item fi-list-item')
-                for bl in transp_bl:
-                    is_walking_distance = bl.find('svg',
-                                                class_='location__how-label icon-svg').contents[1]
-                    if re.search('#walking', str(is_walking_distance)):
-                        res['gkh_metro_station'] = bl.find('span',
-                                                           class_='fi-list-item__label').text.strip()
-                        res['metro_min'] = int(bl.find('span',
-                                                       class_='location__time').text
-                                        .strip().split('\xa0')[0])
-                        res['metro_km'] = round(float(bl.find('span',
-                                                              class_='fi-list-item__value')
-                                        .text.strip().split(' ')[-2])/1000, 2)
-                        break
-                    print()
-            except Exception as exc:
-                pass
-
-        except (Exception, ):
-            print('данные о доме не получены')
-            logging.info('данные о доме не получены')
-    except Exception as exc:
-        print (exc)
-    # try:
-    #     driver.quit()
-    # except (Exception, ):
-    #     pass
-    if pd.isna(res['gkh_metro_station']):
-        res['gkh_metro_station'] = 'Отсутствует в пешей доступности'
-        res['metro_min'] = 90
-        res['metro_km'] = 20
-    if pd.isna(res['is_renov']):
-        res['is_renov'] = 0
-
-    try:
-        if re.search('от ', res['gkh_total_floors']) and re.search('от ', res['gkh_total_floors']):
-            res['is_total_floors_variable'] = 1
-    except (Exception, ):
-        pass
-
-    res['gkh_total_floors']= max_floor(res['gkh_total_floors'])
-
-# ---> проверка данных о доме
-
-    # print(res)
-    # print('Сохранить данные?')
-    # is_norm_data = input()
-    # if is_norm_data in ['N', 'n']:
-    #     pd.DataFrame.from_dict(res).to_excel('time_gkh.xlsx')
-    #     print('Внесены изменения?')
-    #     is_ready_to_save = input()
-    #     if is_ready_to_save in ['Y', 'y']:
-    #         res_new = pd.read_excel('time_gkh.xlsx').to_dict()
-
-
-
-    if not pd.isna(res['building_page_url']):
-        update_gkh_base(addr_norm, res)
-    else:
-        print('Не получен ', res)
-        logging.info(f'Объект {res} не получен')
-    print(res)
-    logging.info(f'Объект {res}')
-    return res
+#                 if not is_equal_addr:
+#                     print('адреса не совпадают')
+#                     print(addr_norm)
+#                     print(parse_addr_line)
+#                     logging.info('адреса не совпадают')
+#                     print('Ввести правильный url?')
+#                     is_cont = input()
+#                     while is_cont not in ['Y', 'y', 'N', 'n']:
+#                         print('Некорректный ввод - y/n')
+#                         is_cont = input()
+#                     if is_cont in ['Y', 'y']:
+#                         print('Введите правильный url')
+#                         new_url = input()
+#                         driver.get(new_url)
+#                         # if re.search('h_info', new_url) is not None:
+#                         #     addr_line = re.sub(' в Москве', '',
+#                         #                        driver.find_element(By.XPATH, "//h1[starts-with(text(), 'О доме')]").text)
+#                         #     parse_addr_line = secondary_addr_normalize_for_metrodistance(addr_line)
+#                         #     if (parse_addr_line.lower()) != addr_norm:
+#                         #         print('адреса нового url не совпадают')
+#                         #         logging.info('адреса нового url не совпадают')
+#                         #         driver.quit()
+#                         #         return res
+#                         cur_url = new_url
+#                     else:
+#                         driver.quit()
+#                         return res
+#                 print('адреса норм')
+#                 logging.info('адреса норм')
+#                 res['gkh_address'] = addr_norm
+#                 driver.quit()
+#         except Exception as exc:
+#             print(exc)
+#     else:
+#         cur_url = url_ready
+#         res['gkh_address'] = addr_norm
+#         # driver = start_browser_for_parse()
+#     try:
+#         try:
+#             r = requests.get(cur_url)
+#             res['building_page_url'] = cur_url
+#             soup = BeautifulSoup(r.text, 'lxml')
+#             # скачиваем страницу инфы о доме
+#             full_info = soup.find('div', class_='page__content')
+#             li_blocks = full_info.find_all('li', class_='fi-list__item fi-list-item')
+#             # и ищем характеристики этажности
+#             for li_bl in li_blocks:
+#                 try:
+#                     label_text = li_bl.find('span', class_='fi-list-item__label').text.strip()
+#                     param_value = li_bl.find('span', class_='fi-list-item__value').text.strip()
+#                 except:
+#                     continue
+#
+#                 if label_text == 'Этажей всего':
+#                     t2 = param_value.strip('\r').strip('\n').strip('\t').split('\n')
+#                     t3 = t2[0].strip()
+#                     res['gkh_total_floors'] = t3
+#
+#                 elif label_text == 'Год постройки':
+#                     try:
+#                         res['construction_year'] = int(param_value.strip('\n').strip())
+#                     except Exception as exc:
+#                         print(addr_norm, 'ошибка определения года постройки ', param_value)
+#                         logging.info(f'{addr_norm} ошибка определения года постройки {param_value}')
+#                 elif label_text == 'Округ':
+#                     res['adm_area'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Район':
+#                     res['mun_district'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Гео-координаты':
+#                     try:
+#                         res['geo_lat'] = round(float(param_value.strip('\n')
+#                                                      .split('/')[0].strip()), 5)
+#                         res['geo_lon'] = round(float(param_value.strip('\n')
+#                                                      .split('/')[1].strip()), 5)
+#                     except Exception as exc:
+#                         print(addr_norm, 'ошибка определения координат ', param_value)
+#                         logging.info(f'{addr_norm} ошибка определения координат {param_value}')
+#                 elif label_text == 'Перекрытия':
+#                     res['overlap_material'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Каркас':
+#                     res['skeleton'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Стены':
+#                     res['wall_material'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Категория':
+#                     res['category'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Лифтов в подъезде' or \
+#                         label_text == 'Пассажирских лифтов в подъезде':
+#                     res['passenger_elevators_qty'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Состояние':
+#                     res['condition'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Кадастровый номер дома':
+#                     res['gkh_cadastr_num'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Высота потолков':
+#                     try:
+#                         res['ceiling_height'] = int(param_value.strip('\n').strip().split(' ')[0])
+#                     except Exception as exc:
+#                         print('Ошибка определения высоты потолков - ', param_value)
+#                 elif label_text == 'Код адреса КЛАДР':
+#                     res['code_KLADR'] = param_value.strip('\n').strip()
+#                 elif label_text == 'Расселение по реновации':
+#                     if not re.search('не включен', param_value.lower()):
+#                         res['is_renov'] = 1
+#                         value_lst = param_value.strip('\n').strip().split(' ')
+#                         res['renov_period'] = value_lst[-4] + '-' + value_lst[-2]
+#                 elif label_text == 'Проживает':
+#                     try:
+#                         res['residents_qty'] = int(param_value.strip('\n').strip().split(' ')[0])
+#                     except Exception as exc:
+#                         print(addr_norm, 'ошибка определения количества проживающих ', param_value)
+#                         logging.info(f'{addr_norm} ошибка определения количества проживающих {param_value}')
+#                 else:
+#                     if re.search('ремонт', label_text):
+#                         print(addr_norm, 'упоминание капремонта  ', label_text, param_value)
+#                         logging.info(f'{addr_norm} упоминание капремонта {label_text} {param_value}')
+#
+#             try:
+#                 transport_data = full_info.find('ul', class_='fi-list underground')
+#                 transp_bl = transport_data.find_all('li', class_='fi-list__item fi-list-item')
+#                 for bl in transp_bl:
+#                     is_walking_distance = bl.find('svg',
+#                                                 class_='location__how-label icon-svg').contents[1]
+#                     if re.search('#walking', str(is_walking_distance)):
+#                         res['gkh_metro_station'] = bl.find('span',
+#                                                            class_='fi-list-item__label').text.strip()
+#                         res['metro_min'] = int(bl.find('span',
+#                                                        class_='location__time').text
+#                                         .strip().split('\xa0')[0])
+#                         res['metro_km'] = round(float(bl.find('span',
+#                                                               class_='fi-list-item__value')
+#                                         .text.strip().split(' ')[-2])/1000, 2)
+#                         break
+#                     print()
+#             except Exception as exc:
+#                 pass
+#
+#         except (Exception, ):
+#             print('данные о доме не получены')
+#             logging.info('данные о доме не получены')
+#     except Exception as exc:
+#         print (exc)
+#     # try:
+#     #     driver.quit()
+#     # except (Exception, ):
+#     #     pass
+#     if pd.isna(res['gkh_metro_station']):
+#         res['gkh_metro_station'] = 'Отсутствует в пешей доступности'
+#         res['metro_min'] = 90
+#         res['metro_km'] = 20
+#     if pd.isna(res['is_renov']):
+#         res['is_renov'] = 0
+#
+#     try:
+#         if re.search('от ', res['gkh_total_floors']) and re.search('от ', res['gkh_total_floors']):
+#             res['is_total_floors_variable'] = 1
+#     except (Exception, ):
+#         pass
+#
+#     res['gkh_total_floors']= max_floor(res['gkh_total_floors'])
+#
+# # ---> проверка данных о доме
+#
+#     # print(res)
+#     # print('Сохранить данные?')
+#     # is_norm_data = input()
+#     # if is_norm_data in ['N', 'n']:
+#     #     pd.DataFrame.from_dict(res).to_excel('time_gkh.xlsx')
+#     #     print('Внесены изменения?')
+#     #     is_ready_to_save = input()
+#     #     if is_ready_to_save in ['Y', 'y']:
+#     #         res_new = pd.read_excel('time_gkh.xlsx').to_dict()
+#
+#
+#
+#     if not pd.isna(res['building_page_url']):
+#         update_gkh_base(addr_norm, res)
+#     else:
+#         print('Не получен ', res)
+#         logging.info(f'Объект {res} не получен')
+#     print(res)
+#     logging.info(f'Объект {res}')
+#     return res
 
 # -
 def renov_fill(ser):
@@ -1664,10 +1705,12 @@ def check_out_of_data_metro_floor(norm_df):
         norm_df.gkh_metro_station.isna() | norm_df.gkh_total_floors.isna() | norm_df.construction_year.isna()] \
         .drop_duplicates(subset=['addr_norm'], keep='last')
     if out_of_data.shape[0] != 0:
+        driver = start_browser_for_parse()
         print('Отсутвуют данные по ', len(out_of_data), ' объектам')
         logging.info(f'Отсутвуют данные по {len(out_of_data)} объектам')
         print('Дождитесь окончания сбора и сохранения данных')
-        out_of_data.progress_apply(lambda x: metro_and_floor_data(x.gkh_address, x.building_page_url), axis=1)
+        out_of_data.progress_apply(lambda x: metro_and_floor_data(driver, x.gkh_address, x.building_page_url), axis=1)
+        driver.quit()
         # проверка new_gkh_df через 2gis
         control_new_gkh_df_2gis()
         if len(new_gkh_df) > 0:
@@ -2262,10 +2305,9 @@ def get_grid_final_shadow_root(driver):
     shadow_root8 = root8.shadow_root
     return driver, shadow_root8
 
-def winner_def():
-
+def parse_winner():
     driver = start_browser_for_parse(pict=True)
-    driver.implicitly_wait(10)
+    driver.implicitly_wait(3)
     winner_url = 'https://w7.baza-winner.ru/search/9a224416-a516-4e66-afd3-0deb2fb13ea6/list'
     print('')
     driver.get('https://w7.baza-winner.ru/main')#winner_url)
@@ -2289,7 +2331,7 @@ def winner_def():
     act_el.send_keys(WINNER_PWD)
     act_el.send_keys(Keys.ENTER)
 
-    time.sleep(5)
+    time.sleep(10)
 
     print(driver.current_url)
 
@@ -2311,9 +2353,14 @@ def winner_def():
     time.sleep(5)
     driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.HOME)
     time.sleep(5)
+    driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.HOME)
+    time.sleep(5)
+    prev_el = row_el
+    is_first_iteration = True
 # >--------------
-    while current_position < total_position:
+    while current_position < total_position + 1:
         try:
+            time.sleep(2)
             driver, shadow_root8 = get_grid_final_shadow_root(driver)
             root9 = shadow_root8.find_element(By.CLASS_NAME, "ag-center-cols-container")
             string_els = root9.find_elements(By.CSS_SELECTOR, "div[role='row']")
@@ -2321,19 +2368,21 @@ def winner_def():
             root9_num = shadow_root8.find_element(By.CSS_SELECTOR, "bw-grid-panel-control")
             shadow_root9_num = root9_num.shadow_root
             root10_num = shadow_root9_num.find_element(By.CSS_SELECTOR, "div[id='itemCount']")
-            position_array = root10_num.text.split('/')
-            if position_array[0].strip() != '?':
-                current_position = int(position_array[0].strip())
-            total_position = int(position_array[1].strip())
-            pbar.update(round((current_position - prev_position) * 100 / total_position, 0))
+            if is_first_iteration:
+                position_array = root10_num.text.split('/')
+                total_position = int(position_array[1].strip())
+                is_first_iteration = False
+            pbar.update(round((current_position - prev_position) * 100 / total_position, 2))
+            prev_position = current_position
             dict_list = []
             for el in string_els:
+                # print(el.get_attribute('aria-rowindex'))
                 row = {WINNER_BASE_FIELDS[i]: np.nan for i in range(len(WINNER_BASE_FIELDS))}
                 try:
                     row['addr_string'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='9']").text
                 except:
-                    print('Ошибка опрделения адреса')
-                    print(el.text)
+                    print('Ошибка опрделения адреса. предыдущая строка')
+                    print(prev_el.text)
                 try:
                     row['qty_rooms'] = int(el.find_element(By.CSS_SELECTOR, "div[aria-colindex='6']").text)
                 except Exception as exc:
@@ -2383,28 +2432,51 @@ def winner_def():
                     row['exposition_days'] = -1
 
                 row['seller_name'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='22']").text
-                winner_df = pd.concat([winner_df, pd.DataFrame.from_records([row])] ,ignore_index=True)
+                winner_df = pd.concat([winner_df, pd.DataFrame.from_records([row])], ignore_index=True)
+                prev_el = el
 
-            last_el = string_els[-1]
-            last_el.find_element(By.CSS_SELECTOR, "div[aria-colindex='2']").click()
+            current_position = int(prev_el.get_attribute('aria-rowindex'))
+#            print('last_el row_index', current_position)
             driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.PAGE_DOWN)
-            prev_position = current_position
+            driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.PAGE_DOWN)
+
         except Exception as exc:
             print(traceback.format_exc().split('Stacktrace:')[0])
             print(row)
-    #time.sleep(100)
     pbar.close()
     print(len(winner_df))
+
+# ---> сохраняем дубликаты в файл
+    duplicated_winner = winner_df[winner_df.duplicated(subset=['addr_string', 'qty_rooms', 'addr_floor','total_floors',
+                                      'obj_square'], keep=False)]
+    duplicated_winner.sort_values(by=['addr_string', 'qty_rooms', 'addr_floor','total_floors',
+                                      'obj_square']).to_csv(r'duplicated_winner.csv', index=False)
+# >------------
+
     winner_df.drop_duplicates(subset=['addr_string', 'qty_rooms', 'addr_floor','total_floors',
-                                      'obj_square'], keep='first', inplace=True)
+                                      'obj_square'],
+                                keep='first', inplace=True)
     print(len(winner_df))
     driver.quit()
-    winner_df.to_csv(r'test_winner.csv', index=False)
+    return winner_df
 
-#    winner_df = pd.read_csv(r'test_winner.csv')
+def winner_def():
+
+#   winner_df = parse_winner()
+
+    winner_df = pd.read_csv(r'test_winner.csv')
 
 
     if len(winner_df) > 0:
+        winner_addresses = winner_df.drop_duplicates(subset=['addr_string'])
+        gkh_df = pd.read_csv(GKH_BASE_FILENAME)
+        driver = start_browser_for_parse()
+        for i, row in winner_addresses.iterrows():
+            if row['addr_string'] not in gkh_df['addr_winner']:
+                if not row['addr_string'].startswith('ЖК'):
+                    metro_and_floor_data(driver, row['addr_string'], None, is_for_winner=True)
+
+        driver.quit()
         winner_df = recognize_and_normalize_addresses(winner_df)
         # после распознавания адресов - уточняем данные о метро и этажности
         winner_df = is_metro_and_floor_data_complete(winner_df)
@@ -2413,21 +2485,19 @@ def winner_def():
     print()
 
 def test_def():
-    lines = ['Москва,Садовническая ул., 77С2',
-            'Москва, Мира просп., 188Бк3']
-    for line in lines:
-        ret = metro_and_floor_data(line, None)
-        #ret = primary_addr_normalize(line)
-        print(ret)
+    # lines = ['Москва,Садовническая ул., 77С2',
+    #         'Москва, Мира просп., 188Бк3']
+    # for line in lines:
+    #     ret = metro_and_floor_data(line, None)
+    #     #ret = primary_addr_normalize(line)
+    #     print(ret)
+    df = pd.read_csv(GKH_BASE_FILENAME)
+    df['addr_winner'] = np.nan
+    df.to_csv(GKH_BASE_FILENAME, index=False)
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    #
-    # test_url_list=['https://torgi.gov.ru/new/public/notices/view/21000005000000010042']
-    # driver = start_browser_for_parse()
-    # for url_ in test_url_list:
-    #     driver, lot_status, final_price = is_lot_finished(driver, url_)
-    #     print(lot_status, final_price)
+
     WINNER_LOGIN = "+79800201607"
     WINNER_PWD = "1q2w3e4r5"
     WINNER_BASE_FIELDS = ['addr_string', 'addr_street', 'addr_build_num',
@@ -2453,7 +2523,7 @@ if __name__ == '__main__':
                   'passenger_elevators_qty', 'condition', 'gkh_metro_station',
                   'metro_km', 'metro_min', 'gkh_cadastr_num', 'code_KLADR', 'global_repair_date',
                   'is_renov', 'renov_period',
-                  'building_page_url']
+                  'building_page_url', 'addr_winner']
     OUTPUT_ACTIVE_COLS = ['lot_tag', 'auct_type', 'object_type', 'cadastr_num',
                 'adm_area', 'mun_district', 'addr_norm',
                 'flat_num', 'qty_rooms', 'addr_floor', 'total_floors', 'is_total_floors_variable',
