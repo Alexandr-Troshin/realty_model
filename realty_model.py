@@ -1065,7 +1065,10 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
             parse_addr_line = re.sub(' г. Зеленоград, д.', ' г. Зеленоград, к.', parse_addr_line)
             print(addr_norm)
             print(parse_addr_line)
-            res['gkh_address'] = parse_addr_line.lower()
+            if (convert_addr_to_winner_type(parse_addr_line.lower()) == addr_norm.lower()):
+                res['gkh_address'] = parse_addr_line.lower()
+            else:
+                return res
         else:
             res['gkh_address'] = addr_norm
         # driver = start_browser_for_parse()
@@ -1192,7 +1195,7 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
     res['gkh_total_floors']= max_floor(res['gkh_total_floors'])
 
     if not pd.isna(res['building_page_url']):
-        update_gkh_base(addr_norm, res)
+        update_gkh_base(res['gkh_address'], res)
     else:
         print('Не получен ', res)
         logging.info(f'Объект {res} не получен')
@@ -1702,6 +1705,18 @@ def control_new_gkh_df_2gis():
             print('flatinfo год постройки - ', row['construction_year'])
             print(is_controlled)
     driver_2gis.quit()
+    if len(new_gkh_df) > 0:
+        update_new_buildings(r'..\realty_model_files\new_buildings.xlsx', new_gkh_df,
+                             startcol=1, startrow=2)
+        print('Не все данные распознались успешно')
+        logging.info('Не все данные распознались успешно')
+        print('Внесите данные о метро и этажности вручную в файл new_buildings.xlsx.')
+        print('Затем сохраните и закройте файл. Нажмите Enter.')
+        input()
+        add_unrecognized()
+    else:
+        gkh_df = gkh_df.drop_duplicates(subset=['gkh_address'], keep='last')
+        gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
 
 def check_out_of_data_metro_floor(norm_df):
     """ Функция проверки полноты данных о привязке к метро и этажности зданий, году постройки. При отсутствии данных в базе ЖКХ -
@@ -1726,18 +1741,6 @@ def check_out_of_data_metro_floor(norm_df):
         #driver.quit()
         # проверка new_gkh_df через 2gis
         control_new_gkh_df_2gis()
-        if len(new_gkh_df) > 0:
-            update_new_buildings(r'..\realty_model_files\new_buildings.xlsx', new_gkh_df,
-                                 startcol=1, startrow=2)
-            print('Не все данные распознались успешно')
-            logging.info('Не все данные распознались успешно')
-            print('Внесите данные о метро и этажности вручную в файл new_buildings.xlsx.')
-            print('Затем сохраните и закройте файл. Нажмите Enter.')
-            input()
-            add_unrecognized()
-        else:
-            gkh_df = gkh_df.drop_duplicates(subset=['gkh_address'], keep='last')
-            gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
         gkh_df = pd.read_csv(GKH_BASE_FILENAME)
         gkh_df['gkh_address'] = gkh_df.gkh_address.apply(lambda x: str(x).lower())
         print('Данные сохранены')
@@ -1762,7 +1765,7 @@ def is_metro_and_floor_data_complete(norm_df):
     return norm_df
 
 # -
-def fill_spaces_in_data(norm_df):
+def fill_spaces_in_data(norm_df, is_for_winner = False):
     """ Функция заполняет пропуски в данных, добавляет информацией о реновации,
         добавляет timestamp для сортировки.
         :param norm_df: полный датафрейм после парсинга лотов
@@ -1779,16 +1782,20 @@ def fill_spaces_in_data(norm_df):
                 return "Нет данных"
         else:
             return x.cadastr_num
-    norm_df['cadastr_num'] = norm_df.apply(lambda x: fill_cadastr_num(x), axis=1)
+    if not is_for_winner:
+        norm_df['cadastr_num'] = norm_df.apply(lambda x: fill_cadastr_num(x), axis=1)
+        norm_df['renov_period'] = norm_df['renov_period'].fillna("Не включен в программу")
+        norm_df['addr_floor'] = norm_df['addr_floor'].fillna(norm_df['addr_floor_from_title']).fillna("Нет данных")
+        norm_df['flat_num'] = norm_df['flat_num'].fillna(norm_df['addr_apart_num_from_title']).fillna("Нет данных")
+        if norm_df['qty_rooms'].isna().sum() > 0:
+            norm_df = fill_qty_rooms_with_predictions(norm_df)
+        NUMERIC_COLUMNS = ['inf_sales', 'inf_food_service', 'inf_education',
+                           'inf_cult_and_sport', 'inf_consumer_services', 'inf_health_care',
+                           'residents_qty', 'ceiling_height', 'passenger_elevators_qty']
+    else:
+        NUMERIC_COLUMNS = ['residents_qty', 'ceiling_height', 'passenger_elevators_qty']
+
     norm_df['is_total_floors_variable'] = norm_df['is_total_floors_variable'].fillna(0)
-    norm_df['renov_period'] = norm_df['is_total_floors_variable'].fillna("Не включен в программу")
-    norm_df['addr_floor'] = norm_df['addr_floor'].fillna(norm_df['addr_floor_from_title']).fillna("Нет данных")
-    norm_df['flat_num'] = norm_df['flat_num'].fillna(norm_df['addr_apart_num_from_title']).fillna("Нет данных")
-    if norm_df['qty_rooms'].isna().sum() > 0:
-        norm_df = fill_qty_rooms_with_predictions(norm_df)
-    NUMERIC_COLUMNS = ['inf_sales', 'inf_food_service', 'inf_education',
-            'inf_cult_and_sport', 'inf_consumer_services', 'inf_health_care',
-             'residents_qty', 'ceiling_height', 'passenger_elevators_qty']
     norm_df[NUMERIC_COLUMNS] = norm_df[NUMERIC_COLUMNS].fillna(-1)
     norm_df = norm_df.fillna("Нет данных")
 
@@ -2038,8 +2045,8 @@ def historical_processing():
             lot_status_torgi = 0
             if url not in final_df['investmoscow_url']:
                 driver, lot_single = parse_lot(driver, url)
-
-            if pd.to_datetime(lot_single['results_date']) >= today - datetime.timedelta(days=7):
+# если дата подведения результатов не наступила - переходим к след. url
+            if pd.to_datetime(lot_single['results_date']) >= today: #- datetime.timedelta(days=7):
                 continue
             driver, lot_status_data = control_lot(driver, url)
 
@@ -2050,7 +2057,6 @@ def historical_processing():
                 print(url, lot_single['roseltorg_url'])
                 lot_reestr_num = str(lot_single['roseltorg_url']).split('/')[-1]
             if lot_reestr_num in bidding_df.reestr_num.values:
- #           if bidding_df[bidding_df.reestr_num==lot_reestr_num].loc['reestr_num']:
                 lot_bidding_data = bidding_df.loc[bidding_df.reestr_num == lot_reestr_num]
                 if lot_status_data['status'] not in status_lst:
                     try:
@@ -2481,6 +2487,7 @@ def parse_winner():
 def winner_def():
     global driver
     global gkh_df
+    global new_gkh_df
 
 #   winner_df = parse_winner()
     #cur_winner_df = pd.read_csv(WINNER_FILENAME)
@@ -2496,15 +2503,14 @@ def winner_def():
             if row['addr_winner'] not in gkh_df['addr_winner']:
                 if not row['addr_winner'].startswith('ЖК'):
                     metro_and_floor_data(row['addr_winner'], None, is_for_winner=True)
-        gkh_df = gkh_df.drop_duplicates(subset=['gkh_address'], keep='last')
-        gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
+        control_new_gkh_df_2gis()
+        gkh_df = pd.read_csv(GKH_BASE_FILENAME)
+        gkh_df['gkh_address'] = gkh_df.gkh_address.apply(lambda x: str(x).lower())
       #  driver.quit()
         winner_df = winner_df.merge(gkh_df, on='addr_winner', how='left')
-        winner_df['addr_string'] = winner_df['gkh_address']
-        winner_df = recognize_and_normalize_addresses(winner_df)
-        # после распознавания адресов - уточняем данные о метро и этажности
-        winner_df = is_metro_and_floor_data_complete(winner_df)
-        winner_df = fill_spaces_in_data(winner_df)
+        winner_df['addr_norm'] = winner_df['gkh_address']
+
+        winner_df = fill_spaces_in_data(winner_df, is_for_winner=True)
 #        output_winner_cols = WINNER_BASE_FIELDS + GKH_FIELDS
         winner_df = pd.concat([cur_winner_df, winner_df], ignore_index=True)
         winner_df = winner_df.drop_duplicates(keep='last').reset_index(drop=True)
@@ -2528,7 +2534,10 @@ if __name__ == '__main__':
     WINNER_FILENAME = r'..\realty_model_files\winner_data.csv'
     WINNER_LOGIN = "+79800201607"
     WINNER_PWD = "1q2w3e4r5"
-    WINNER_BASE_FIELDS = ['addr_winner', 'addr_street', 'addr_build_num',
+
+    #winner - убрать столбцы addr_street, addr_build_num, добавить addr_norm
+
+    WINNER_BASE_FIELDS = ['addr_winner', 'addr_norm',
                             'qty_rooms', 'addr_floor', 'total_floors', 'obj_square', 'price',
                             'price_m2', 'date', 'is_active', 'seller_name', 'exposition_days']
     LOT_FIELDS = ['lot_tag', 'auct_type', 'object_type', 'cadastr_num', 'addr_string',
@@ -2622,9 +2631,10 @@ if __name__ == '__main__':
             bidding_def()
         elif mode_choice == '6':
             test_def()
+        driver.quit()
     except Exception as e:
         driver.quit()
         print('Ошибка: ', traceback.format_exc().split('Stacktrace:')[0])
         logging.info(f'Ошибка: {traceback.format_exc().split("Stacktrace:")[0]}')
 
-    driver.quit()
+  #  driver.quit()
