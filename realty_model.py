@@ -951,7 +951,8 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
     if pd.isna(url_ready):
         try:
 
-            driver.get('https://flatinfo.ru')
+            driver.get('https://flatinfo.ru/h_info1.asp?hid=368947')
+
             time.sleep(2)
             element = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/input[1]")
             adr1 = re.sub('проезд.', 'проезд', addr_norm)
@@ -2500,7 +2501,7 @@ def winner_def():
         winner_addresses = winner_df.drop_duplicates(subset=['addr_winner'])
         gkh_df = pd.read_csv(GKH_BASE_FILENAME)
 #        driver = start_browser_for_parse()
-        driver.get('https://flatinfo.ru')
+        driver.get('https://flatinfo.ru/h_info1.asp?hid=368947')
         time.sleep(2)
         for i, row in winner_addresses[:30].iterrows():
             if row['addr_winner'] not in gkh_df['addr_winner']:
