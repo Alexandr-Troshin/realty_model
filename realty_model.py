@@ -952,6 +952,7 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
         try:
 
             driver.get('https://flatinfo.ru')
+            time.sleep(2)
             element = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/input[1]")
             adr1 = re.sub('проезд.', 'проезд', addr_norm)
             adr1 = re.sub('пр-кт.', 'проспект', adr1)
@@ -2499,9 +2500,12 @@ def winner_def():
         winner_addresses = winner_df.drop_duplicates(subset=['addr_winner'])
         gkh_df = pd.read_csv(GKH_BASE_FILENAME)
 #        driver = start_browser_for_parse()
+        driver.get('https://flatinfo.ru')
+        time.sleep(2)
         for i, row in winner_addresses[:30].iterrows():
             if row['addr_winner'] not in gkh_df['addr_winner']:
-                if not row['addr_winner'].startswith('ЖК'):
+#                if not row['addr_winner'].startswith('ЖК'):
+                if not re.search('ЖК', row['addr_winner']):
                     metro_and_floor_data(row['addr_winner'], None, is_for_winner=True)
         control_new_gkh_df_2gis()
         gkh_df = pd.read_csv(GKH_BASE_FILENAME)
@@ -2509,7 +2513,7 @@ def winner_def():
       #  driver.quit()
         winner_df = winner_df.merge(gkh_df, on='addr_winner', how='left')
         winner_df['addr_norm'] = winner_df['gkh_address']
-
+        winner_df=winner_df[~pd.isna(winner_df['gkh_address'])]
         winner_df = fill_spaces_in_data(winner_df, is_for_winner=True)
 #        output_winner_cols = WINNER_BASE_FIELDS + GKH_FIELDS
         winner_df = pd.concat([cur_winner_df, winner_df], ignore_index=True)
@@ -2524,9 +2528,18 @@ def test_def():
     #     ret = metro_and_floor_data(line, None)
     #     #ret = primary_addr_normalize(line)
     #     print(ret)
-    df = pd.read_csv(GKH_BASE_FILENAME)
-    df['addr_winner'] = np.nan
-    df.to_csv(GKH_BASE_FILENAME, index=False)
+
+    # df = pd.read_csv(GKH_BASE_FILENAME)
+    # print(df.head(3))
+    # df.drop(columns=['del_col'], inplace=True)
+    # print(df.head(3))
+    # df.to_csv(GKH_BASE_FILENAME, index=False)
+
+    winner_df = pd.read_csv(r'test_winner.csv')
+    winner_df.drop(columns=['addr_build_num'], inplace=True)
+    winner_df.to_csv(r'test_winner.csv', index=False)
+
+
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
@@ -2608,7 +2621,7 @@ if __name__ == '__main__':
                       3: ['&room4=1&room5=1&room6=1', '4+']
                       })
 
-    driver = start_browser_for_parse()
+    driver = start_browser_for_parse(pict=True)
 
     try:
         print('Выберите модуль: ')
