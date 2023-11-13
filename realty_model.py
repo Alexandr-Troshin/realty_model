@@ -951,10 +951,13 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
     if pd.isna(url_ready):
         try:
 
-            driver.get('https://flatinfo.ru/h_info1.asp?hid=368947')
+            #driver.get('https://flatinfo.ru/h_info1.asp?hid=368947')
+
+            # driver.get("https://yandex.ru")
+            # driver.find_element_by_id('text').send_keys('flatinfo ' + )
 
             time.sleep(2)
-            element = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/input[1]")
+            # element = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/input[1]")
             adr1 = re.sub('проезд.', 'проезд', addr_norm)
             adr1 = re.sub('пр-кт.', 'проспект', adr1)
             adr1 = re.sub('пр-д', 'проспект', adr1)
@@ -974,18 +977,35 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
                     st1 = st[0].split()
                     adr1 = re.sub(st[0], st1[1] + ' ' + st1[0], adr1)
       # >----
-            element.send_keys(adr1)
+      #       element.send_keys(adr1)
+      #       time.sleep(3)
+            driver.get("https://google.com")
             time.sleep(3)
-            butt = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/button[1]")
-            ActionChains(driver).click(butt).perform()
-            time.sleep(3)
-            try:
-                ActionChains(driver).click(butt).perform()
-            except (Exception, ):
-                pass
+            txt_area = driver.find_element(By.XPATH, '//textarea')#.send_keys('flatinfo ' + adr1).send_keys(Keys.ENTER)
+            txt_area.send_keys('flatinfo о доме ' + adr1)
+            txt_area.send_keys(Keys.ENTER)
+            time.sleep(1)
+            search_page = driver.find_element(By.XPATH, '//div[@id="search"]') #.find_elements(By.CSS_SELECTOR, 'a')
+            possible_urls = search_page.find_elements(By.CSS_SELECTOR, 'a')
+            for fi_url in possible_urls:
+                url_str = fi_url.get_attribute('href')
+                if re.search("https://flatinfo.ru/h_info", url_str):
+                    fi_url.click()
+                    cur_url = re.sub('h_info2', 'h_info1', url_str)
+                    print(cur_url)
+                    break
+            print()
+            #butt = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/button[1]")
+            # butt = driver.find_element(By.XPATH, "//div[@class='search-home input-group search-home_show']/button[1]")
+            # ActionChains(driver).click(butt).perform()
+            # time.sleep(3)
+            # try:
+            #     ActionChains(driver).click(butt).perform()
+            # except (Exception, ):
+            #     pass
 
             # и сохраняем адрес перехода
-            cur_url = driver.current_url
+           # cur_url = driver.current_url
             print(cur_url)
             logging.info(str(cur_url))
             # если переход произошел на страницу с данными о доме
@@ -1005,6 +1025,9 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
                     cur_url = new_url
 
             if re.search('h_info', cur_url) is not None:
+                r = requests.get(cur_url)
+                soup = BeautifulSoup(r.text, 'lxml')
+
                 full_addr_str = driver.find_element(By.XPATH, "//h1[starts-with(text(), 'О доме')]").text
                 addr_line = full_addr_str.split(' в ')[0]
                 # addr_line = re.sub(' в Москве', '',full_addr_str)
@@ -1371,11 +1394,15 @@ def get_url_list_from_page(driver, cur_page_url, is_active):
     nfo = soup.find_all('a', attrs={"class": "uid-tenders-card__main"})
     today = pd.to_datetime('today')
     for el in nfo:
-        deadline = el.find('div', attrs={"class": "uid-text-small uid-text-gray"})\
-                        .span.text.split(',')[0]
-        deadline_date = datetime.datetime.strptime(deadline, "%d.%m.%Y").date()
-        if (is_active and deadline_date>=today) or (not is_active and deadline_date<=today):
-            url_page_lst.append('https://investmoscow.ru' + el['href'])
+        try:
+            txt_line = el.find('div', attrs={"class": "uid-text-small uid-text-gray"})
+            if ((is_active and re.search('Окончание приема заявок:', txt_line.text))
+                    or
+                    (not is_active and txt_line.text == 'Торги завершены')):
+                url_page_lst.append('https://investmoscow.ru' + el['href'])
+        except Exception as exc:
+            print(exc)
+            continue
 
     return driver, url_page_lst
 
@@ -2010,7 +2037,7 @@ def historical_processing():
  #   driver = start_browser_for_parse()
     driver.implicitly_wait(10)
     # url до 26.04.2023 'https://investmoscow.ru/tenders?pageNumber=1&pageSize=100&orderBy=CreateDate&orderAsc=false&objectTypes=7&tenderTypes=13&tenderStatuses=1&tradeForms=45001'
-    main_page_url = 'https://investmoscow.ru/tenders?pageNumber=1&pageSize=10&orderBy=RequestEndDate&orderAsc=false&objectTypes=nsi:41:30011568&objectKinds=nsi:tender_type_portal:13&tenderStatus=nsi:tender_status_tender_filter:2&timeToPublicTransportStop.noMatter=true'
+    main_page_url = 'https://investmoscow.ru/tenders?pageNumber=1&pageSize=100&orderBy=RequestEndDate&orderAsc=false&objectTypes=nsi:41:30011568&objectKinds=nsi:tender_type_portal:13&tenderStatus=nsi:tender_status_tender_filter:2&timeToPublicTransportStop.noMatter=true'
     driver.get(main_page_url)
     wait = WebDriverWait(driver, 10)
     if re.search('-',num):
@@ -2258,7 +2285,7 @@ def refresh_bidding_df():
                                    'win_price', 'applicant_qty', 'win_name'])
     proc_df.applicant_qty = proc_df.applicant_qty.apply(lambda x: int(x) if x != 'Нет'
                                                                             else 0)
-    proc_df.participant_qty = proc_df.apply(lambda x: max(x.particpant_qty,
+    proc_df.participant_qty = proc_df.apply(lambda x: max(x.participant_qty,
                                                                 x.applicant_qty), axis=1)
     proc_df.win_price = proc_df.apply(lambda x: x.start_price
                                                         if (x.win_price == 0 and
@@ -2501,8 +2528,8 @@ def winner_def():
         winner_addresses = winner_df.drop_duplicates(subset=['addr_winner'])
         gkh_df = pd.read_csv(GKH_BASE_FILENAME)
 #        driver = start_browser_for_parse()
-        driver.get('https://flatinfo.ru/h_info1.asp?hid=368947')
-        time.sleep(2)
+        #driver.get('https://flatinfo.ru/h_info1.asp?hid=368947')
+        #time.sleep(2)
         for i, row in winner_addresses[:30].iterrows():
             if row['addr_winner'] not in gkh_df['addr_winner']:
 #                if not row['addr_winner'].startswith('ЖК'):
