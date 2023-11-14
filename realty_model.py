@@ -991,7 +991,8 @@ def metro_and_floor_data(addr_norm, url_ready, is_for_winner=False):
                 url_str = fi_url.get_attribute('href')
                 if re.search("https://flatinfo.ru/h_info", url_str):
                     fi_url.click()
-                    cur_url = re.sub('h_info2', 'h_info1', url_str)
+                    # cur_url = re.sub('h_info2', 'h_info1', url_str)
+
                     print(cur_url)
                     break
             print()
