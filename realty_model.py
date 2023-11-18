@@ -2437,8 +2437,10 @@ def parse_winner():
     time.sleep(5)
     prev_el = row_el
     is_first_iteration = True
+    cnt = 0
 # >--------------
     while current_position < total_position + 1:
+        cnt += 1
         try:
             time.sleep(2)
             driver, shadow_root8 = get_grid_final_shadow_root(driver)
@@ -2466,8 +2468,11 @@ def parse_winner():
                 try:
                     row['qty_rooms'] = int(el.find_element(By.CSS_SELECTOR, "div[aria-colindex='6']").text)
                 except Exception as exc:
-                    row['qty_rooms'] = -1
-                    print('Ошибка определения комнат ', row['addr_winner'])
+                    if el.find_element(By.CSS_SELECTOR, "div[aria-colindex='6']").text == 'Ст':
+                        row['qty_rooms'] = 1
+                    else:
+                        row['qty_rooms'] = -1
+                        print('Ошибка определения комнат ', row['addr_winner'])
                 floor_params = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='10']").text
                 try:
                     row['addr_floor'] = int(floor_params.split('/')[0])
@@ -2519,7 +2524,12 @@ def parse_winner():
 #            print('last_el row_index', current_position)
             driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.PAGE_DOWN)
             driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.PAGE_DOWN)
-
+            if cnt % 100 == 0:
+                winner_df.drop_duplicates(subset=['addr_winner', 'qty_rooms', 'addr_floor', 'total_floors',
+                                                  'obj_square'],
+                                          keep='first', inplace=True)
+                winner_df.to_csv(r'winner_data_'+str(cnt // 100)+'.xlsx')
+                winner_df = pd.DataFrame(columns=WINNER_BASE_FIELDS)
         except Exception as exc:
             print(traceback.format_exc().split('Stacktrace:')[0])
             print(row)
@@ -2545,7 +2555,8 @@ def winner_def():
     global gkh_df
     global new_gkh_df
 
-#   winner_df = parse_winner()
+    winner_df = parse_winner()
+    return 0
     #cur_winner_df = pd.read_csv(WINNER_FILENAME)
     cur_winner_df = pd.DataFrame()
     winner_df = pd.read_csv(r'test_winner.csv')
