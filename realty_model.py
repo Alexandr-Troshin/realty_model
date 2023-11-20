@@ -2690,6 +2690,190 @@ def test_def():
     # winner_df.to_csv(r'test_winner.csv', index=False)
 
 
+def parse_winner_with_metro():
+    global driver
+
+    driver.quit()
+    driver = start_browser_for_parse(pict=True)
+    driver.implicitly_wait(3)
+    winner_url = 'https://w7.baza-winner.ru/search/9a224416-a516-4e66-afd3-0deb2fb13ea6/list'
+    print('')
+    driver.get('https://w7.baza-winner.ru/main')#winner_url)
+    # ----> нажатие на кнопку "Войти"
+    shadow_host = WebDriverWait(driver, 5).until(
+        EC.visibility_of(driver.find_element(By.TAG_NAME, 'bw-app')))
+    shadow_root1 = shadow_host.shadow_root
+    root2 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(shadow_root1.find_element(By.ID, 'header')))
+    root3 = WebDriverWait(driver, 5).until(
+        EC.visibility_of(root2.find_element(By.CSS_SELECTOR, 'bw-user-control')))
+    shadow_root3 = root3.shadow_root
+    WebDriverWait(driver, 5).until(
+        EC.visibility_of(shadow_root3.find_element(By.CSS_SELECTOR, "iron-icon"))).click()
+    time.sleep(2)
+
+    act_el  = driver.switch_to.active_element
+
+    act_el.send_keys(WINNER_LOGIN)
+    act_el.send_keys(Keys.TAB)
+    act_el.send_keys(WINNER_PWD)
+    act_el.send_keys(Keys.ENTER)
+
+    time.sleep(10)
+
+    print(driver.current_url)
+
+    winner_df = pd.DataFrame(columns=WINNER_BASE_FIELDS_WITH_METRO)
+    current_position = 0
+    prev_position = 0
+    total_position = 1
+    pbar = tqdm(total=100)
+# ---> до парсинга переключаемся на открытую позицию, делаем клик и поднимаемся на начало списка
+# (при открытии сохраняется последнее положение на странице)
+    time.sleep(1)
+    driver, shadow_root8 = get_grid_final_shadow_root(driver)
+    root9 = shadow_root8.find_element(By.CLASS_NAME, "ag-center-cols-container")
+    row_el = root9.find_element(By.CSS_SELECTOR, "div[role='row']")
+    WebDriverWait(driver, 5).until(
+        EC.visibility_of(
+            row_el.find_element(By.CSS_SELECTOR, "div[aria-colindex='2']"))).click()
+    driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.HOME)
+    time.sleep(5)
+    driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.HOME)
+    time.sleep(5)
+    driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.HOME)
+    time.sleep(5)
+    prev_el = row_el
+    is_first_iteration = True
+    cnt = 0
+# >--------------
+    while current_position < total_position + 1:
+        cnt += 1
+        try:
+            time.sleep(2)
+            driver, shadow_root8 = get_grid_final_shadow_root(driver)
+            root9 = shadow_root8.find_element(By.CLASS_NAME, "ag-center-cols-container")
+            string_els = root9.find_elements(By.CSS_SELECTOR, "div[role='row']")
+    #----->поиск номера текущей позиции
+            root9_num = shadow_root8.find_element(By.CSS_SELECTOR, "bw-grid-panel-control")
+            shadow_root9_num = root9_num.shadow_root
+            root10_num = shadow_root9_num.find_element(By.CSS_SELECTOR, "div[id='itemCount']")
+            if is_first_iteration:
+                position_array = root10_num.text.split('/')
+                total_position = int(position_array[1].strip())
+                is_first_iteration = False
+            pbar.update(round((current_position - prev_position) * 100 / total_position, 2))
+            prev_position = current_position
+
+            for el in string_els:
+                # print(el.get_attribute('aria-rowindex'))
+                row = {WINNER_BASE_FIELDS_WITH_METRO[i]: np.nan for i in range(len(WINNER_BASE_FIELDS_WITH_METRO))}
+                try:
+                    row['addr_winner'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='9']").text
+                except:
+                    print('Ошибка опрделения адреса. предыдущая строка')
+                    print(prev_el.text)
+                try:
+                    row['qty_rooms'] = int(el.find_element(By.CSS_SELECTOR, "div[aria-colindex='6']").text)
+                except Exception as exc:
+                    if el.find_element(By.CSS_SELECTOR, "div[aria-colindex='6']").text == 'Ст':
+                        row['qty_rooms'] = 1
+                    elif el.find_element(By.CSS_SELECTOR, "div[aria-colindex='6']").text == 'СП':
+                        row['qty_rooms'] = 0
+                    else:
+                        row['qty_rooms'] = -1
+                        print('Ошибка определения комнат ', row['addr_winner'])
+                floor_params = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='10']").text
+                try:
+                    row['addr_floor'] = int(floor_params.split('/')[0])
+                    row['total_floors'] = int(floor_params.split('/')[1].split(' ')[0])
+                except Exception as exc:
+                    row['addr_floor'] = -1
+                    row['total_floors'] = -1
+                    print('Ошибка определения этажей ', row['addr_winner'], floor_params)
+                try:
+                    row['obj_square'] = round(float(el.find_element(By.CSS_SELECTOR, "div[aria-colindex='14']")
+                                              .text.split('/')[0]), 1)
+                except Exception as exc:
+                    row['obj_square'] = -1
+                    print('Ошибка определения площади ', row['addr_winner'])
+                    print(el.find_element(By.CSS_SELECTOR, "div[aria-colindex='14']")
+                                              .text.split('/')[0])
+                try:
+                    row['price'] = int(re.sub(' ', '',
+                                        el.find_element(By.CSS_SELECTOR, "div[aria-colindex='16']")
+                                              .text.split(',')[0]))
+                    row['price_m2'] = round(row['price']/row['obj_square'], 0)
+                except Exception as exc:
+                    row['price'] = -1
+                    row['price_m2'] = -1
+                    print('Ошибка определения цены ', row['addr_winner'])
+                    print(el.find_element(By.CSS_SELECTOR, "div[aria-colindex='16']")
+                          .text)
+                try:
+                    row['date'] = pd.to_datetime(
+                        el.find_element(By.CSS_SELECTOR, "div[aria-colindex='19']").text,
+                        infer_datetime_format=True, format='%d.%m.%Y', errors='coerce')
+                except Exception as exc:
+                    row['date'] = pd.to_datetime('01.01.1970', format='%d.%m.%Y', errors='coerce')
+
+                try:
+                    metro_min = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='8']").text
+                    if metro_min[-1] == 'п':
+                        row['metro_minutes_winner'] = int(metro_min[:-1])
+                        row['metro_station_winner'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='7']").text
+                    else:
+                        row['metro_minutes_winner'] = -1
+
+                except Exception as exc:
+                    row['metro_minutes_winner'] = -1
+
+                try:
+                    exp_days = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='20']").text
+                    if exp_days != '':
+                        row['exposition_days'] = int(exp_days)
+                    else:
+                        row['exposition_days'] = 0
+                except Exception as exc:
+                    row['exposition_days'] = -1
+
+                row['seller_name'] = el.find_element(By.CSS_SELECTOR, "div[aria-colindex='22']").text
+
+                row['is_active'] = 0
+
+                winner_df = pd.concat([winner_df, pd.DataFrame.from_records([row])], ignore_index=True)
+                prev_el = el
+
+            current_position = int(prev_el.get_attribute('aria-rowindex'))
+#            print('last_el row_index', current_position)
+            driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.PAGE_DOWN)
+            driver.find_element(By.CSS_SELECTOR, 'body').send_keys(Keys.PAGE_DOWN)
+            if cnt % 100 == 0:
+                winner_df.drop_duplicates(subset=['addr_winner', 'qty_rooms', 'addr_floor', 'total_floors',
+                                                  'obj_square'],
+                                          keep='first', inplace=True)
+                winner_df.to_csv(r'winner_data_w_metro'+str(cnt // 100)+'.csv', index=False)
+                winner_df = pd.DataFrame(columns=WINNER_BASE_FIELDS_WITH_METRO)
+        except Exception as exc:
+            print(traceback.format_exc().split('Stacktrace:')[0])
+            print(row)
+    pbar.close()
+    print(len(winner_df))
+
+# ---> сохраняем дубликаты в файл
+#     duplicated_winner = winner_df[winner_df.duplicated(subset=['addr_winner', 'qty_rooms', 'addr_floor','total_floors',
+#                                       'obj_square'], keep=False)]
+#     duplicated_winner.sort_values(by=['addr_winner', 'qty_rooms', 'addr_floor','total_floors',
+#                                       'obj_square']).to_csv(r'duplicated_winner.csv', index=False)
+# # >------------
+#
+#     winner_df.drop_duplicates(subset=['addr_winner', 'qty_rooms', 'addr_floor','total_floors',
+#                                       'obj_square'],
+#                                 keep='first', inplace=True)
+#     print(len(winner_df))
+#    driver.quit()
+    return winner_df
+
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
@@ -2705,6 +2889,10 @@ if __name__ == '__main__':
     WINNER_BASE_FIELDS = ['addr_winner', 'addr_norm',
                             'qty_rooms', 'addr_floor', 'total_floors', 'obj_square', 'price',
                             'price_m2', 'date', 'is_active', 'seller_name', 'exposition_days']
+    WINNER_BASE_FIELDS_WITH_METRO = ['addr_winner', 'addr_norm',
+                          'qty_rooms', 'addr_floor', 'total_floors', 'obj_square', 'price',
+                          'price_m2', 'date', 'is_active', 'seller_name', 'exposition_days',
+                                     'metro_station_winner', 'metro_minutes_winner']
     LOT_FIELDS = ['lot_tag', 'auct_type', 'object_type', 'cadastr_num', 'addr_string',
                   'addr_street', 'addr_build_num', 'addr_floor_from_title', 'addr_apart_num_from_title',
                   'flat_num', 'qty_rooms', 'addr_floor', 'total_floors', 'obj_square', 'start_price',
@@ -2788,6 +2976,7 @@ if __name__ == '__main__':
         print('   4 - WINNER')
         print('   5 - переоформление biddings')
         print('   6 - тест')
+        print('   7 - winner с метро')
         mode_choice = input()
         if mode_choice == '1':
             refresh_bidding_df()
@@ -2801,6 +2990,8 @@ if __name__ == '__main__':
             bidding_def()
         elif mode_choice == '6':
             test_def()
+        elif mode_choice == '7':
+            parse_winner_with_metro()
         driver.quit()
     except Exception as e:
         driver.quit()
