@@ -1816,7 +1816,7 @@ def control_new_gkh_df_2gis():
                     #print(el.find_element(By.XPATH, "//span[@class='_18zamfw']").text)
 
             except Exception as exc:
-                print(exc)
+                print(traceback.format_exc().split('Stacktrace:')[0])
                 is_controlled = True
 
             if not is_controlled:
@@ -1886,6 +1886,9 @@ def is_metro_and_floor_data_complete(norm_df):
     """
     print('Проверка наличия данных о метро и этажности зданий')
     logging.info('Проверка наличия данных о метро и этажности зданий')
+    driver.get('https://flatinfo.ru')
+    print('Проверьте CAPTCHA и нажмите ENTER')
+    input()
     norm_df = check_out_of_data_metro_floor(norm_df)
     norm_df = check_out_of_data_metro_floor(norm_df)
 
@@ -2243,7 +2246,7 @@ def historical_processing():
     final_df.drop(columns=['id', 'reestr_num'], inplace=True)
     output_columns = hist_cols + ['participant_qty', 'win_price', 'win_name']
     final_df[output_columns].to_csv("files_for_files\\output\\"
-                                        + current_date_string[:8] + '_'
+                                        + current_date_string[:10] + '_'
                                         + LOT_FILENAME_HISTORICAL.split('\\')[-1],
                                    index=False)
 
@@ -2367,7 +2370,7 @@ def actual_moskowinvest():
     norm_df.drop(columns=['id', 'reestr_num', 'win_price', 'win_name'], inplace=True)
     output_columns = OUTPUT_ACTIVE_COLS + ['participant_qty']
     norm_df[output_columns].to_csv("files_for_files\\output\\"
-                                       + current_date_string[:8] + LOT_FILENAME.split('\\')[-1],
+                                       + current_date_string[:10] + '_' + LOT_FILENAME.split('\\')[-1],
                                    index=False)
 
 def refresh_bidding_df():
@@ -2630,8 +2633,9 @@ def winner_def():
     # return 0
     #cur_winner_df = pd.read_csv(WINNER_FILENAME)
     cur_winner_df = pd.DataFrame()
-    winner_df = pd.read_csv(r'test_winner.csv')
-#    winner_df = winner_df[0:100]
+    winner_df = pd.read_csv(r'winner_cian_3.csv')
+    winner_df = winner_df[WINNER_BASE_FIELDS]
+    #winner_df = winner_df[0:1000]
 
     if len(winner_df) > 0:
         winner_addresses = winner_df.drop_duplicates(subset=['addr_winner'])
@@ -2642,13 +2646,23 @@ def winner_def():
         driver.get('https://flatinfo.ru')
         print('Проверьте CAPTCHA и нажмите ENTER')
         input()
+        pbar = tqdm(total=len(winner_addresses))
         cnt = 1
-        for i, row in winner_addresses.iterrows():
-            if not gkh_df['addr_winner'].isin([row['addr_winner'].lower()]).any():
-#                if not row['addr_winner'].startswith('ЖК'):
-                if not re.search('ЖК', row['addr_winner']):
-                    cnt += 1
-                    metro_and_floor_data(row['addr_winner'], None, is_for_winner=True)
+        try:
+            for i, row in winner_addresses.iterrows():
+                cnt += 1
+                pbar.update(1)
+                try:
+                    if not gkh_df['addr_winner'].isin([row['addr_winner'].lower()]).any():
+        #                if not row['addr_winner'].startswith('ЖК'):
+                        if not re.search('ЖК', row['addr_winner']):
+                            metro_and_floor_data(row['addr_winner'], None, is_for_winner=True)
+                except Exception as exc:
+                    print(traceback.format_exc().split('Stacktrace:')[0])
+        except KeyboardInterrupt:
+            pass
+
+        pbar.close()
             # if cnt % 20 == 0:
             #     print(i)
             #     control_new_gkh_df_2gis()
@@ -2679,11 +2693,20 @@ def test_def():
     #     #ret = primary_addr_normalize(line)
     #     print(ret)
 
-    df = pd.read_csv(GKH_BASE_FILENAME)
-    print(df.head(3))
-    df.drop(columns=['del_col'], inplace=True)
-    print(df.head(3))
-    df.to_csv(GKH_BASE_FILENAME, index=False)
+
+    winner_df = pd.DataFrame()
+    for i in range(7):
+        wdf = pd.read_csv(r'winner_cian_3\winner_data_' + str(i+1) + '.xlsx')
+        winner_df = pd.concat([winner_df, wdf], ignore_index=True)
+    winner_df = winner_df[WINNER_BASE_FIELDS]
+    winner_df.to_csv(r'winner_data_3.csv', index=False)
+
+
+    # df = pd.read_csv(GKH_BASE_FILENAME)
+    # print(df.head(3))
+    # df.drop(columns=['del_col'], inplace=True)
+    # print(df.head(3))
+    # df.to_csv(GKH_BASE_FILENAME, index=False)
 
     # winner_df = pd.read_csv(r'test_winner.csv')
     # winner_df.drop(columns=['addr_build_num'], inplace=True)
@@ -2937,7 +2960,7 @@ if __name__ == '__main__':
                 ]
     SCROLL_PAUSE_TIME = 0.7
     current_date = datetime.datetime.now()
-    current_date_string = current_date.strftime('%y_%m_%d_%H_%M')
+    current_date_string = current_date.strftime('%Y_%m_%d_%H_%M')
 #    historical_processing()
     print(current_date_string)
     logging.basicConfig(
@@ -2968,6 +2991,7 @@ if __name__ == '__main__':
     driver = start_browser_for_parse(pict=True)
 
     is_manual_info = False
+
     try:
         print('Выберите модуль: ')
         print('   1 - Обновить данные по торгам roseltorg')
