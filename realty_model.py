@@ -2643,7 +2643,13 @@ def winner_def():
 #        driver = start_browser_for_parse()
         #driver.get('https://flatinfo.ru/h_info1.asp?hid=368947')
         #time.sleep(2)
+
+# flatinfo
+        #driver.get('https://flatinfo.ru')
+
+# moscowmap
         driver.get('https://flatinfo.ru')
+
         print('Проверьте CAPTCHA и нажмите ENTER')
         input()
         pbar = tqdm(total=len(winner_addresses))
@@ -2684,6 +2690,94 @@ def winner_def():
         winner_df.to_csv(WINNER_FILENAME, index=False)
         no_data_winner_df[WINNER_BASE_FIELDS].to_csv(NO_DATA_WINNER_FILENAME, index=False)
     print()
+
+def parse_addr_using_2gis():
+    global gkh_df
+    global new_gkh_df
+    # winner_df = parse_winner()
+    # return 0
+    #cur_winner_df = pd.read_csv(WINNER_FILENAME)
+    cur_winner_df = pd.DataFrame()
+    winner_df = pd.read_csv(r'winner_cian_3.csv')
+    winner_df = winner_df[WINNER_BASE_FIELDS]
+    #winner_df = winner_df[0:1000]
+
+    if len(winner_df) > 0:
+        winner_addresses = winner_df.drop_duplicates(subset=['addr_winner'])
+        gkh_df = pd.read_csv(GKH_BASE_FILENAME)
+        driver_2gis = start_browser_for_parse(pict=True)
+        driver_2gis.get('https://2gis.ru/moscow')
+        winner_addresses = winner_addresses[:30].reset_index(drop=True)
+        for i, row in tqdm(winner_addresses.iterrows(), position=1):
+            try:
+
+                res = {GKH_FIELDS[i]: np.nan for i in range(len(GKH_FIELDS))}
+#                res['addr_winner'] = row['addr_winner']
+                element = driver_2gis.find_element(By.XPATH, "//input[@class='_1gvu1zk']")
+                adr1 = row['addr_winner']
+                element.send_keys(adr1)
+                # element.send_keys(Keys.ARROW_DOWN)
+                # active_el = driver_2gis.switch_to.active_element
+                # print(BeautifulSoup(active_el.get_attribute('innerHTML'),
+                #               "html.parser"))
+                text_of = driver_2gis.find_element(By.XPATH, "//div[@class='_1u4plm2']")
+                text_parse = BeautifulSoup(text_of.get_attribute('innerHTML'),
+                              "html.parser")
+                text_els = text_of.find_elements()
+                print(text_parse)
+                text_parse.to_csv('parse_text.csv')
+                element.send_keys(Keys.ENTER)
+                time.sleep(2)
+                driver_2gis.find_element(By.XPATH, "//div[@class='_zjunba']").click()
+                time.sleep(2)
+                try:
+                    addr_el = driver_2gis.find_element(By.XPATH, "//h1[@class='_tvxwjf']").text
+                    print(row['addr_winner'])
+                    print(addr_el)
+
+                except Exception as exc:
+                    break
+                fl_el = driver_2gis.find_element(By.XPATH, "//div[@class='_49kxlr']/span/span[2]")
+                try:
+                    res['gkh_total_floors'] = int(fl_el.text.split(' ')[0])
+                except Exception as exc:
+                    print(' 2 gis этажность неопределена' )
+                table_elements = driver_2gis.find_elements(By.XPATH, "//li[@class='_4rm1c']")
+                for el in table_elements:
+                    if el.text.split('\n')[0] == 'Год постройки':
+                        try:
+                            res['construction_year'] = int(el.text.split('\n')[1])
+                        except:
+                            print(' 2 gis год постройки не определен')
+                    if el.text.split('\n')[0] == 'Материал стен':
+                        res['wall_material'] = el.text.split('\n')[1]
+                    if el.text.split('\n')[0] == 'Количество лифтов':
+                        res['passenger_elevators_qty'] = el.text.split('\n')[1]
+
+            except Exception as exc:
+                print(traceback.format_exc().split('Stacktrace:')[0])
+                is_controlled = True
+
+            if not is_controlled:
+                gkh_df = pd.concat([gkh_df, row.to_frame().T])
+                new_gkh_df = new_gkh_df.drop(i)
+
+        driver_2gis.quit()
+        if len(new_gkh_df) > 0:
+            update_new_buildings(r'files_for_files\new_buildings.xlsx', new_gkh_df,
+                                 startcol=1, startrow=2)
+            print('Не все данные распознались успешно')
+            logging.info('Не все данные распознались успешно')
+            print('Внесите данные о метро и этажности вручную в файл new_buildings.xlsx.')
+            print('Затем сохраните и закройте файл. Нажмите Enter.')
+            input()
+            add_unrecognized()
+            new_gkh_df = pd.DataFrame()
+        else:
+            gkh_df = gkh_df.drop_duplicates(subset=['gkh_address'], keep='last')
+            gkh_df.to_csv(GKH_BASE_FILENAME, index=False)
+            new_gkh_df = pd.DataFrame()
+
 
 def test_def():
     # lines = ['Москва,Садовническая ул., 77С2',
@@ -3001,6 +3095,7 @@ if __name__ == '__main__':
         print('   5 - переоформление biddings')
         print('   6 - тест')
         print('   7 - winner с метро')
+        print('   8 - 2gis - парсинг адресов')
         mode_choice = input()
         if mode_choice == '1':
             refresh_bidding_df()
@@ -3016,6 +3111,8 @@ if __name__ == '__main__':
             test_def()
         elif mode_choice == '7':
             parse_winner_with_metro()
+        elif mode_choice == '8':
+            parse_addr_using_2gis()
         driver.quit()
     except Exception as e:
         driver.quit()
